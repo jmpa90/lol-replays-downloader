@@ -1,39 +1,25 @@
 import os
 import json
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+# =====================
+# CONFIG
+# =====================
 REPLAY_FOLDER = "replays"
 DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
-# Leer el JSON del secret
-creds_json = os.environ.get("GOOGLE_DRIVE_CREDENTIALS")
-if not creds_json:
-    raise ValueError("No se encontró la variable de entorno GOOGLE_DRIVE_CREDENTIALS")
+# =====================
+# CARGAR TOKEN DESDE SECRETS
+# =====================
+token_json = os.environ.get("GOOGLE_DRIVE_TOKEN")
+if not token_json:
+    raise ValueError("No se encontró la variable de entorno GOOGLE_DRIVE_TOKEN")
 
-creds = service_account.Credentials.from_service_account_info(
-    json.loads(creds_json),
-    scopes=["https://www.googleapis.com/auth/drive.file"]
-)
-
+creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
 service = build("drive", "v3", credentials=creds)
-
-# =====================
-# FUNCIONES AUXILIARES
-# =====================
-def find_file_in_drive(name, folder_id):
-    """Busca un archivo por nombre dentro de una carpeta de Drive"""
-    query = f"'{folder_id}' in parents and name='{name}' and trashed=false"
-    results = service.files().list(
-        q=query,
-        spaces='drive',
-        fields='files(id, name)'
-    ).execute()
-    files = results.get('files', [])
-    if files:
-        return files[0]  # devuelve el primer match
-    return None
 
 # =====================
 # SUBIDA DE REPLAYS
@@ -49,57 +35,47 @@ for root, dirs, files in os.walk(REPLAY_FOLDER):
             print(f"Procesando {local_path}...")
 
             try:
-                file_metadata = {
-                    "name": file_name,
-                    "parents": [DRIVE_FOLDER_ID]
-                }
-                media = MediaFileUpload(local_path, resumable=True)
+                # Primero buscar si el archivo ya existe en Drive
+                query = f"name='{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed=false"
+                results = service.files().list(q=query, fields="files(id, name)").execute()
+                files_in_drive = results.get("files", [])
 
-                # Revisar si ya existe en Drive
-                existing_file = find_file_in_drive(file_name, DRIVE_FOLDER_ID)
-                if existing_file:
-                    # Si existe, actualizar contenido
+                if files_in_drive:
+                    # Si existe, actualizarlo
+                    file_id = files_in_drive[0]["id"]
+                    media = MediaFileUpload(local_path, resumable=False)
                     uploaded_file = service.files().update(
-                        fileId=existing_file['id'],
+                        fileId=file_id,
                         media_body=media,
-                        fields='id,name,webViewLink'
+                        fields="id,name,webViewLink"
                     ).execute()
-                    action = "Actualizado"
+                    print(f"Actualizado: {uploaded_file['name']} (ID: {uploaded_file['id']})")
                 else:
-                    # Si no existe, crear
+                    # Si no existe, crear nuevo
+                    file_metadata = {"name": file_name, "parents": [DRIVE_FOLDER_ID]}
+                    media = MediaFileUpload(local_path, resumable=False)
                     uploaded_file = service.files().create(
                         body=file_metadata,
                         media_body=media,
-                        fields='id,name,webViewLink'
+                        fields="id,name,webViewLink"
                     ).execute()
-                    action = "Subido"
-
-                print(f"{action}: {uploaded_file['name']}")
-                print(f"ID: {uploaded_file['id']}")
-                print(f"URL: {uploaded_file['webViewLink']}")
+                    print(f"Subido: {uploaded_file['name']} (ID: {uploaded_file['id']})")
 
                 uploaded_metadata.append({
-                    "file_name": uploaded_file['name'],
-                    "drive_file_id": uploaded_file['id'],
-                    "webViewLink": uploaded_file['webViewLink'],
+                    "file_name": uploaded_file["name"],
+                    "drive_file_id": uploaded_file["id"],
+                    "webViewLink": uploaded_file["webViewLink"],
                     "local_path": local_path
                 })
 
-                # Borrar archivo local con retry en Windows
-                for attempt in range(5):
-                    try:
-                        os.remove(local_path)
-                        print(f"{file_name} eliminado localmente.\n")
-                        break
-                    except PermissionError:
-                        time.sleep(0.5)
+                # Borrar archivo local después de subirlo
+                os.remove(local_path)
+                print(f"{file_name} eliminado localmente.\n")
 
             except Exception as e:
                 print(f"Error subiendo {local_path}: {e}")
 
-# =====================
-# GUARDAR METADATA
-# =====================
+# Guardar metadata temporal
 if uploaded_metadata:
     with open("uploaded_temp.json", "w") as f:
         json.dump(uploaded_metadata, f, indent=2)
