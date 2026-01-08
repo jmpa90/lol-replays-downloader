@@ -1,0 +1,12 @@
+*.rofl
+replays/
+archives/
+secrets/
+.venv/
+*.zip
+node_modules/
+.env
+credentials.json
+get_token_for_drive.py
+token.json
+index_temp.json
