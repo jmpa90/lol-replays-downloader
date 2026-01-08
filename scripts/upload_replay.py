@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 REPLAY_FOLDER = "replays"
-DRIVE_FOLDER_ID = "TU_DRIVE_FOLDER_ID"
+DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
 
 # Leer el JSON del secret
 creds_json = os.environ.get("GOOGLE_DRIVE_CREDENTIALS")
