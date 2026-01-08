@@ -1,25 +1,22 @@
 import os
 import json
-import time
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# =====================
-# CONFIG
-# =====================
 REPLAY_FOLDER = "replays"
-DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
-TOKEN_FILE = "token.json"
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+DRIVE_FOLDER_ID = "TU_DRIVE_FOLDER_ID"
 
-# =====================
-# AUTENTICACIÓN
-# =====================
-if not os.path.exists(TOKEN_FILE):
-    raise FileNotFoundError(f"No se encontró {TOKEN_FILE}. Ejecuta get_token_for_drive.py primero.")
+# Leer el JSON del secret
+creds_json = os.environ.get("GOOGLE_DRIVE_CREDENTIALS")
+if not creds_json:
+    raise ValueError("No se encontró la variable de entorno GOOGLE_DRIVE_CREDENTIALS")
 
-creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+creds = service_account.Credentials.from_service_account_info(
+    json.loads(creds_json),
+    scopes=["https://www.googleapis.com/auth/drive.file"]
+)
+
 service = build("drive", "v3", credentials=creds)
 
 # =====================
