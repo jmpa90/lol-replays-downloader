@@ -9,7 +9,7 @@ from googleapiclient.http import MediaFileUpload
 # =====================
 REPLAY_FOLDER = "replays"
 DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 # =====================
 # CARGAR TOKEN DESDE SECRETS
