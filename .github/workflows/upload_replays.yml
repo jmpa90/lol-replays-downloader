@@ -2,7 +2,7 @@ name: Upload LoL Replays
 
 on:
   schedule:
-    - cron: "*/15 * * * *"  # cada 15 minutos
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
