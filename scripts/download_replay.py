@@ -120,12 +120,23 @@ def main():
     print(f"👥 Jugadores cargados: {len(players)}")
 
     for player in players:
-        print(
-            f"🔎 {player['riotIdGameName']}#{player['riotIdTagline']} "
-            f"({player['region']})"
-        )
-        puuid = get_puuid(player)
-        download_replays(puuid, player["region"])
+        try:
+            print(
+                f"🔎 {player['riotIdGameName']}#{player['riotIdTagline']} "
+                f"({player['region']})"
+            )
+
+            puuid = get_puuid(player)
+            download_replays(puuid, player["region"])
+
+        except Exception as e:
+            print(
+                f"❌ Error con {player['riotIdGameName']}#{player['riotIdTagline']} "
+                f"({player['region']}): {e}"
+            )
+            print("➡️ Continuando con el siguiente jugador...\n")
+            continue
+
 
 if __name__ == "__main__":
     main()
