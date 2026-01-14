@@ -1,10 +1,18 @@
-riotIdGameName,riotIdTagline,region
-Hide on bush,KR1,asia
-Peyz,KR11,asia
-Keria,4111,asia
-어리고싶다,KR1,asia
-Soopsik,KR2,asia
-high hopes,DNS,asia
-UmTi,602,asia
-DK ShowMaker,KR1,asia
-오 너,111,asia
+riotIdGameName,riotIdTagline,region,champion_followed,position_followed
+Hide on bush,KR1,asia,,MIDDLE
+Peyz,KR11,asia,,BOTTOM
+Keria,4111,asia,,SUPPORT
+어리고싶다,KR1,asia,,TOP
+Soopsik,KR2,asia,,JUNGLE
+high hopes,DNS,asia,,SUPPORT
+UmTi,602,asia,,JUNGLE
+DK ShowMaker,KR1,asia,,MIDDLE
+오 너,111,asia,,JUNGLE
+SAND Five,zypp,asia,Aurora,MIDDLE
+adad,6003,asia,Draven,BOTTOM
+TiSaD VN,T1SaD,asia,Gwen,TOP
+마아타,KR1,asia,Jarvaniv,JUNGLE
+petrichor,0237,asia,Qiyana,MIDDLE
+Indexy,KR1,asia,Viego,MIDDLE
+현 진,KR0,asia,Ziggs,BOTTOM
+316099,2502,asia,Zoe,MIDDLE
