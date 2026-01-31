@@ -1,30 +1,6 @@
-# import os
-# import json
-# from google.oauth2.credentials import Credentials
-# from googleapiclient.discovery import build
-# from googleapiclient.http import MediaFileUpload
-
-# # =====================
-# # CONFIG
-# # =====================
-# REPLAY_FOLDER = "replays"
-# DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
-# SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-# # =====================
-# # CARGAR TOKEN DESDE SECRETS
-# # =====================
-# token_json = os.environ.get("GOOGLE_DRIVE_TOKEN")
-# if not token_json:
-#     raise ValueError("No se encontró la variable de entorno GOOGLE_DRIVE_TOKEN")
-
-# creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
-# service = build("drive", "v3", credentials=creds)
-
 import os
 import json
-# CAMBIO 1: Importar service_account
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -36,20 +12,44 @@ DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 # =====================
-# CARGAR TOKEN DESDE SECRETS (SERVICE ACCOUNT)
+# CARGAR TOKEN DESDE SECRETS
 # =====================
-# CAMBIO 2: Leer el JSON de la Service Account desde la variable de entorno
-sa_json = os.environ.get("GCP_SERVICE_ACCOUNT") # Antes era GOOGLE_DRIVE_TOKEN
-if not sa_json:
-    raise ValueError("No se encontró la variable de entorno GCP_SERVICE_ACCOUNT")
+token_json = os.environ.get("GOOGLE_DRIVE_TOKEN")
+if not token_json:
+    raise ValueError("No se encontró la variable de entorno GOOGLE_DRIVE_TOKEN")
 
-# CAMBIO 3: Cargar credenciales usando from_service_account_info
-try:
-    sa_info = json.loads(sa_json)
-    creds = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
-    service = build("drive", "v3", credentials=creds)
-except Exception as e:
-    raise ValueError(f"Error cargando credenciales de Service Account: {e}")
+creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+service = build("drive", "v3", credentials=creds)
+
+import os
+import json
+# CAMBIO 1: Importar service_account
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+# # =====================
+# # CONFIG
+# # =====================
+# REPLAY_FOLDER = "replays"
+# DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
+# SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+# # =====================
+# # CARGAR TOKEN DESDE SECRETS (SERVICE ACCOUNT)
+# # =====================
+# # CAMBIO 2: Leer el JSON de la Service Account desde la variable de entorno
+# sa_json = os.environ.get("GCP_SERVICE_ACCOUNT") # Antes era GOOGLE_DRIVE_TOKEN
+# if not sa_json:
+#     raise ValueError("No se encontró la variable de entorno GCP_SERVICE_ACCOUNT")
+
+# # CAMBIO 3: Cargar credenciales usando from_service_account_info
+# try:
+#     sa_info = json.loads(sa_json)
+#     creds = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+#     service = build("drive", "v3", credentials=creds)
+# except Exception as e:
+#     raise ValueError(f"Error cargando credenciales de Service Account: {e}")
 
 # =====================
 # SUBIDA DE REPLAYS
