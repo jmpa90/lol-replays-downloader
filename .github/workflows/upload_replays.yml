@@ -14,8 +14,8 @@ jobs:
 
     env:
       RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-      # GOOGLE_DRIVE_TOKEN: ${{ secrets.GOOGLE_DRIVE_TOKEN }}  # <-- usar token OAuth real
-      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GOOGLE_DRIVE_TOKEN: ${{ secrets.GOOGLE_DRIVE_TOKEN }}  # <-- usar token OAuth real
+      # GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
     steps:
       - uses: actions/checkout@v4
