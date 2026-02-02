@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   upload_replays:
-    runs-on: ubuntu-22.04 # ubuntu-latest
+    runs-on: ubuntu-latest
     
 
     env:
