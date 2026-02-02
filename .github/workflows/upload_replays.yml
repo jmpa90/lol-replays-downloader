@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   upload_replays:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # ubuntu-latest
+    
 
     env:
       RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
