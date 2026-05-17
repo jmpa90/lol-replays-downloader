@@ -15,7 +15,6 @@ load_dotenv()  # Esto lee .env automáticamente
 
 # Ahora sí puedes usarla
 API_KEY = os.getenv("RIOT_API_KEY")
-print(API_KEY)
 
 if not API_KEY:
     raise RuntimeError("RIOT_API_KEY no está seteada")
@@ -83,7 +82,8 @@ def get_puuid(player):
     url = (
         f"https://{player['region']}.api.riotgames.com"
         f"/riot/account/v1/accounts/by-riot-id/"
-        f"{player['riotIdGameName']}/{player['riotIdTagline']}"
+        # f"{player['riotIdGameName']}/{player['riotIdTagline']}"
+        f"{player['riotIdGameName'].replace(' ', '%20')}/{player['riotIdTagline']}"
     )
     data = safe_get(url, headers=HEADERS).json()
     return data["puuid"]
