@@ -99,7 +99,8 @@ def download_replays(puuid, region):
     replays = safe_get(url, headers=HEADERS).json().get("matchFileURLs", [])
 
     for replay_url in replays:
-        match_id = re.search(r"/([^/]+)\.replay", replay_url).group(1)
+        # match_id = re.search(r"/([^/]+)\.replay", replay_url).group(1)
+        match_id = re.search(r"/([^/]+)/0\.replay", replay_url).group(1).upper()
         file_path = os.path.join(replay_folder, f"{match_id}.rofl")
 
         if os.path.exists(file_path):
