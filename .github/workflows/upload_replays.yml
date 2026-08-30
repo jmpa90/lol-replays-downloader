@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write  # necesario para commit automático
 
+# Solo una corrida a la vez: el cron y los workflow_dispatch cada 30 min pueden
+# solaparse (cada run tarda ~13 min) y el segundo push de index.json era
+# rechazado (non-fast-forward). Con esto las corridas se encolan.
+concurrency:
+  group: upload-replays
+  cancel-in-progress: false
+
 jobs:
   upload_replays:
     runs-on: ubuntu-latest
@@ -43,6 +50,9 @@ jobs:
 
       - name: Update index.json
         run: python scripts/update_index.py
+
+      - name: Rebase onto latest main before committing
+        run: git pull --rebase --autostash origin main
 
       - name: Auto-commit updated index.json
         uses: stefanzweifel/git-auto-commit-action@v4
