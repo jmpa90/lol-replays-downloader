@@ -76,17 +76,68 @@ def load_players():
         return list(reader)
 
 # =====================
+# ACCOUNT-V1 ROUTING
+# =====================
+def account_routing(region):
+    """account-v1 is not served on sea.api.riotgames.com (returns 403);
+    match-v5/replay endpoints ARE served on sea and must stay untouched.
+    Mirrors riftcast's account_routing(): sea -> asia for account-v1 only."""
+    if region == "sea":
+        return "asia"
+    return region
+
+# =====================
 # GET PUUID
 # =====================
 def get_puuid(player):
+    account_region = account_routing(player["region"])
     url = (
-        f"https://{player['region']}.api.riotgames.com"
+        f"https://{account_region}.api.riotgames.com"
         f"/riot/account/v1/accounts/by-riot-id/"
         # f"{player['riotIdGameName']}/{player['riotIdTagline']}"
         f"{player['riotIdGameName'].replace(' ', '%20')}/{player['riotIdTagline']}"
     )
     data = safe_get(url, headers=HEADERS).json()
     return data["puuid"]
+
+# =====================
+# MATCH ID EXTRACTION
+# =====================
+MATCH_ID_PATTERNS = (
+    re.compile(r"/([^/]+)/0\.replay"),
+    re.compile(r"/([^/]+)\.replay"),
+)
+
+
+def extract_match_id(replay_url, metadata=None):
+    """Extract the match id from a replay download URL.
+
+    Tries the current `/{matchId}/0.replay` shape first, then the older
+    `/{matchId}.replay` shape, then falls back to a `matchId` key on an
+    optional metadata dict (e.g. a parsed API response). Returns None
+    (instead of raising) when nothing matches, so callers can skip the
+    offending replay rather than crash the whole player loop.
+    """
+    if replay_url:
+        for pattern in MATCH_ID_PATTERNS:
+            match = pattern.search(replay_url)
+            if match:
+                return match.group(1).upper()
+
+    if metadata and metadata.get("matchId"):
+        return str(metadata["matchId"]).upper()
+
+    return None
+
+
+def _truncate_url(url, max_len=80):
+    """Truncate a URL for logging, dropping any signed query string."""
+    if not url:
+        return "<empty>"
+    base = url.split("?", 1)[0]
+    if len(base) > max_len:
+        return base[:max_len] + "..."
+    return base
 
 # =====================
 # DOWNLOAD REPLAYS
@@ -99,19 +150,27 @@ def download_replays(puuid, region):
     replays = safe_get(url, headers=HEADERS).json().get("matchFileURLs", [])
 
     for replay_url in replays:
-        # match_id = re.search(r"/([^/]+)\.replay", replay_url).group(1)
-        match_id = re.search(r"/([^/]+)/0\.replay", replay_url).group(1).upper()
+        match_id = extract_match_id(replay_url)
+        if match_id is None:
+            print(f"⚠️ No se pudo extraer match_id de {_truncate_url(replay_url)}, se omite")
+            continue
+
         file_path = os.path.join(replay_folder, f"{match_id}.rofl")
 
         if os.path.exists(file_path):
             continue
 
-        r = safe_get(replay_url, headers=HEADERS)
+        try:
+            r = safe_get(replay_url, headers=HEADERS)
 
-        with open(file_path, "wb") as f:
-            f.write(r.content)
+            with open(file_path, "wb") as f:
+                f.write(r.content)
 
-        print(f"✅ Guardado {match_id}.rofl ({region})")
+            print(f"✅ Guardado {match_id}.rofl ({region})")
+        except Exception as e:
+            print(f"❌ Error descargando {match_id} ({region}): {e}")
+            print("➡️ Continuando con el siguiente replay...\n")
+            continue
 
 # =====================
 # MAIN

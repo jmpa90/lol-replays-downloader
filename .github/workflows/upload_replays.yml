@@ -53,16 +53,64 @@ jobs:
       - name: Upload replays to Drive
         run: python scripts/upload_replay.py
 
+      # NOTE: upload_replay.py never touches index.json (only reads/writes
+      # replays/ and uploaded_temp.json, both untracked/gitignored), so the
+      # tree is still clean here. Rebasing now -- before index.json is
+      # modified -- means this pull can never itself conflict on index.json.
+      - name: Rebase onto latest main before updating index.json
+        run: git pull --rebase origin main
+
       - name: Update index.json
         run: python scripts/update_index.py
 
-      - name: Rebase onto latest main before committing
-        run: git pull --rebase --autostash origin main
+      # Replaces stefanzweifel/git-auto-commit-action: that action's commit
+      # landed *after* the plain "git pull --rebase --autostash" step above,
+      # so when origin's index.json had moved, the autostash pop conflicted
+      # silently (exit 0) and the follow-up commit failed with "you need to
+      # resolve your current index first". Now we commit+push ourselves with
+      # a retry loop: on a rejected push we rebase onto main again, and if
+      # that rebase conflicts on index.json we union both versions by
+      # drive_file_id instead of dropping either side's uploads.
+      - name: Commit and push index.json
+        run: |
+          set -e
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
 
-      - name: Auto-commit updated index.json
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "Update replay index [skip ci]"
-          commit_user_name: "github-actions"
-          commit_user_email: "actions@github.com"
-          file_pattern: "index.json"
+          git add index.json
+          if git diff --cached --quiet; then
+            echo "No changes to index.json, nothing to commit."
+            exit 0
+          fi
+          git commit -m "Update replay index [skip ci]"
+
+          max_attempts=3
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Push attempt $attempt/$max_attempts..."
+            if git push origin HEAD:main; then
+              echo "Push succeeded."
+              exit 0
+            fi
+
+            echo "Push rejected, rebasing onto latest main..."
+            if git pull --rebase origin main; then
+              echo "Rebase clean, retrying push..."
+            else
+              if git status --porcelain | grep -q "^UU index.json"; then
+                echo "Conflict on index.json, merging both versions by drive_file_id..."
+                python scripts/merge_index_conflict.py
+                git add index.json
+                GIT_EDITOR=true git rebase --continue
+              else
+                echo "Unexpected rebase conflict outside index.json, aborting."
+                git rebase --abort
+                exit 1
+              fi
+            fi
+
+            attempt=$((attempt + 1))
+          done
+
+          echo "Failed to push after $max_attempts attempts."
+          exit 1
