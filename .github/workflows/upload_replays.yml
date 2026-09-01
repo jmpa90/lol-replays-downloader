@@ -2,7 +2,12 @@ name: Upload LoL Replays
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Off-hour minutes on purpose: GitHub documents that schedule events are
+    # delayed/dropped under load and that "high load times include the start
+    # of every hour" -- */30 hit :00 and :30 exactly. Measured 2026-08-26..09-01:
+    # cron fired 30/day until 26-Aug, then 2-6/day. The 30-min cadence today
+    # comes from an external workflow_dispatch trigger; this cron is the backup.
+    - cron: "13,43 * * * *"
   workflow_dispatch:
 
 permissions:
