@@ -4,6 +4,7 @@ from collections import deque
 import os
 import re
 import csv
+import json
 
 # =====================
 # CONFIG
@@ -26,6 +27,14 @@ MAX_REQUESTS_PER_2_MIN = 100
 TIME_WINDOW_2_MIN = 120
 
 PLAYERS_CSV = "data/players.csv"
+
+# Old matches: match-v5 still lists the match id for a player whose most
+# recent games are old, and the replay-download endpoint still hands out a
+# signed S3 URL for it, but the underlying .rofl file has expired on Riot's
+# side -> permanent 404, retried on every run otherwise. riftcast (the
+# consumer) can't use replays older than this anyway.
+REPLAY_MAX_AGE_DAYS = int(os.getenv("REPLAY_MAX_AGE_DAYS", "14"))
+EXPIRED_REPLAYS_PATH = "expired_replays.json"
 
 request_times = deque()
 
@@ -140,19 +149,92 @@ def _truncate_url(url, max_len=80):
     return base
 
 # =====================
+# EXPIRED-REPLAY STATE (permanent 404s)
+# =====================
+def load_expired_replays(path=EXPIRED_REPLAYS_PATH):
+    """Load the set of match ids whose replay download permanently 404s.
+
+    Missing file or invalid JSON both just mean "no known expired replays
+    yet" -- never fatal, this is a best-effort cache.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def save_expired_replays(expired_ids, path=EXPIRED_REPLAYS_PATH):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(sorted(expired_ids), f, indent=2)
+
+
+# =====================
+# RECENT MATCH IDS (age filter)
+# =====================
+def _max_age_start_time(max_age_days, now=None):
+    """Epoch-seconds cutoff for match-v5's `startTime` query param: now
+    minus max_age_days days. `now` is injectable for tests."""
+    if now is None:
+        now = time.time()
+    return int(now - max_age_days * 86400)
+
+
+def get_recent_match_ids(puuid, region, max_age_days):
+    """Match ids for `puuid` created in the last `max_age_days` days, via
+    match-v5's documented by-puuid/ids endpoint (startTime is epoch
+    seconds). This costs exactly one extra API call per PLAYER (not per
+    match), used to filter the /replays endpoint's matchFileURLs -- which
+    has no age filter or timestamps of its own -- down to recent matches.
+
+    Returns None (meaning "unknown, don't filter") on any failure, so a
+    transient error here never blocks downloads that would otherwise
+    succeed.
+    """
+    start_time = _max_age_start_time(max_age_days)
+    url = f"https://{region}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids"
+    try:
+        ids = safe_get(
+            url, headers=HEADERS, params={"startTime": start_time, "count": 100}
+        ).json()
+        return {str(i).upper() for i in ids}
+    except Exception as e:
+        print(f"⚠️ No se pudieron obtener match ids recientes ({region}): {e}")
+        return None
+
+
+def _should_skip(match_id, expired_ids, recent_ids):
+    """True if `match_id` should be skipped without any HTTP request:
+    either it's a known permanently-404 replay, or (when the recent-ids
+    window is known) it falls outside REPLAY_MAX_AGE_DAYS."""
+    if match_id in expired_ids:
+        return True
+    if recent_ids is not None and match_id not in recent_ids:
+        return True
+    return False
+
+
+# =====================
 # DOWNLOAD REPLAYS
 # =====================
-def download_replays(puuid, region):
+def download_replays(puuid, region, expired_ids):
     replay_folder = f"replays/{region}"
     os.makedirs(replay_folder, exist_ok=True)
 
     url = (f"https://{region}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/replays")
     replays = safe_get(url, headers=HEADERS).json().get("matchFileURLs", [])
 
+    recent_ids = get_recent_match_ids(puuid, region, REPLAY_MAX_AGE_DAYS)
+
     for replay_url in replays:
         match_id = extract_match_id(replay_url)
         if match_id is None:
             print(f"⚠️ No se pudo extraer match_id de {_truncate_url(replay_url)}, se omite")
+            continue
+
+        if _should_skip(match_id, expired_ids, recent_ids):
+            if match_id in expired_ids:
+                print(f"⏭️ Replay expirado {match_id} (404 en S3), se omite")
             continue
 
         file_path = os.path.join(replay_folder, f"{match_id}.rofl")
@@ -167,6 +249,14 @@ def download_replays(puuid, region):
                 f.write(r.content)
 
             print(f"✅ Guardado {match_id}.rofl ({region})")
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                print(f"⏭️ Replay expirado {match_id} (404 en S3), se omite")
+                expired_ids.add(match_id)
+            else:
+                print(f"❌ Error descargando {match_id} ({region}): {e}")
+                print("➡️ Continuando con el siguiente replay...\n")
+            continue
         except Exception as e:
             print(f"❌ Error descargando {match_id} ({region}): {e}")
             print("➡️ Continuando con el siguiente replay...\n")
@@ -179,6 +269,9 @@ def main():
     players = load_players()
     print(f"👥 Jugadores cargados: {len(players)}")
 
+    expired_ids = load_expired_replays()
+    print(f"⏭️ Replays expirados conocidos: {len(expired_ids)}")
+
     for player in players:
         try:
             print(
@@ -187,7 +280,7 @@ def main():
             )
 
             puuid = get_puuid(player)
-            download_replays(puuid, player["region"])
+            download_replays(puuid, player["region"], expired_ids)
 
         except Exception as e:
             print(
@@ -196,6 +289,8 @@ def main():
             )
             print("➡️ Continuando con el siguiente jugador...\n")
             continue
+
+    save_expired_replays(expired_ids)
 
 
 if __name__ == "__main__":

@@ -81,8 +81,13 @@ jobs:
           git config user.email "actions@github.com"
 
           git add index.json
+          # expired_replays.json may not exist yet on a repo's very first
+          # run -- only stage it if download_replay.py actually wrote it.
+          if [ -f expired_replays.json ]; then
+            git add expired_replays.json
+          fi
           if git diff --cached --quiet; then
-            echo "No changes to index.json, nothing to commit."
+            echo "No changes to index.json or expired_replays.json, nothing to commit."
             exit 0
           fi
           git commit -m "Update replay index [skip ci]"
@@ -100,13 +105,16 @@ jobs:
             if git pull --rebase origin main; then
               echo "Rebase clean, retrying push..."
             else
-              if git status --porcelain | grep -q "^UU index.json"; then
-                echo "Conflict on index.json, merging both versions by drive_file_id..."
+              if git status --porcelain | grep -qE "^UU (index\.json|expired_replays\.json)"; then
+                echo "Conflict on index.json/expired_replays.json, merging both versions..."
                 python scripts/merge_index_conflict.py
                 git add index.json
+                if [ -f expired_replays.json ]; then
+                  git add expired_replays.json
+                fi
                 GIT_EDITOR=true git rebase --continue
               else
-                echo "Unexpected rebase conflict outside index.json, aborting."
+                echo "Unexpected rebase conflict outside index.json/expired_replays.json, aborting."
                 git rebase --abort
                 exit 1
               fi
