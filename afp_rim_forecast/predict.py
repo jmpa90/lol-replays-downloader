@@ -1,0 +1,44 @@
+"""Scoring de los meses abiertos: produce filas para la tabla `rim_proyectada`."""
+from __future__ import annotations
+
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as F
+
+from .config import Config
+from .features import construir_features
+from .model import HurdleModel
+
+COLUMNAS_PROYECCION = [
+    "afiliado_id", "periodo", "horizonte", "rim_valor", "origen", "detalle_origen",
+    "prob_cotiza", "rim_condicional", "rim_esperada", "rim_predicha_previa",
+    "periodo_snapshot", "periodo_reemplazo", "version_modelo", "fecha_calculo",
+]
+
+
+def proyectar(cfg: Config, tablas: dict[str, DataFrame], modelo: HurdleModel, periodo_snapshot: int,
+              fecha_calculo: str, features: DataFrame | None = None) -> DataFrame:
+    """Proyecta los `cfg.horizontes` meses posteriores al corte para todos los afiliados.
+
+    Los afiliados cuyo mes target ya llego (empleador que paga anticipado) no se predicen:
+    entran directamente como REAL / PAGO_ANTICIPADO.
+    """
+    spark = tablas["afiliados"].sparkSession
+    if features is None:
+        features = construir_features(spark, cfg, tablas, periodo_snapshot)
+    pred = modelo.transform(features.filter(F.col("target_ya_conocido") == 0))
+    predichas = (pred.select(
+        "afiliado_id", F.col("periodo_target").alias("periodo"), F.col("horizonte").cast("int"),
+        F.col("rim_proyectada").alias("rim_valor"), F.lit("PREDICHA").alias("origen"),
+        F.lit("MODELO").alias("detalle_origen"), "prob_cotiza", "rim_condicional", "rim_esperada",
+        F.lit(None).cast("double").alias("rim_predicha_previa"),
+        F.lit(periodo_snapshot).alias("periodo_snapshot"), F.lit(None).cast("int").alias("periodo_reemplazo"),
+        F.lit(modelo.version).alias("version_modelo"), F.lit(fecha_calculo).alias("fecha_calculo")))
+    reales = (features.filter(F.col("target_ya_conocido") == 1).select(
+        "afiliado_id", F.col("periodo_target").alias("periodo"), F.col("horizonte").cast("int"),
+        F.col("rim_ya_conocida").alias("rim_valor"), F.lit("REAL").alias("origen"),
+        F.lit("PAGO_ANTICIPADO").alias("detalle_origen"), F.lit(1.0).alias("prob_cotiza"),
+        F.col("rim_ya_conocida").alias("rim_condicional"), F.col("rim_ya_conocida").alias("rim_esperada"),
+        F.lit(None).cast("double").alias("rim_predicha_previa"),
+        F.lit(periodo_snapshot).alias("periodo_snapshot"), F.lit(None).cast("int").alias("periodo_reemplazo"),
+        F.lit(modelo.version).alias("version_modelo"), F.lit(fecha_calculo).alias("fecha_calculo")))
+    return predichas.unionByName(reales).select(*COLUMNAS_PROYECCION)
