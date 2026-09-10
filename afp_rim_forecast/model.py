@@ -24,6 +24,7 @@ import pandas as pd
 from pyspark.ml import Pipeline, PipelineModel
 from pyspark.ml.classification import GBTClassifier
 from pyspark.ml.feature import StringIndexer, VectorAssembler
+from pyspark.ml.functions import vector_to_array
 from pyspark.ml.regression import GBTRegressor
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -67,7 +68,7 @@ class HurdleModel:
 
     # ---------------------------------------------------------- transform
     def transform(self, df: DataFrame) -> DataFrame:
-        prob = F.element_at(F.col("probability"), 2)   # vector -> P(y=1)
+        prob = vector_to_array(F.col("probability"))[1]   # vector -> P(y=1)
         out = (self.clasificador.transform(df)
                .withColumn("prob_cotiza", prob)
                .drop("features", "rawPrediction", "probability", "prediction",
