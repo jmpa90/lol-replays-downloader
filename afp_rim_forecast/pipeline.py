@@ -95,12 +95,29 @@ def features_por_snapshot(spark: SparkSession, cfg: Config, tablas: dict[str, Da
     return out
 
 
+def etiqueta_madura(cfg: Config, snapshot_entrenamiento: int):
+    """Filas cuyo target real ya deberia haber llegado al momento de entrenar.
+
+    * Dependientes / voluntarios / pensionados: el pago normal del mes m llega en m+1 y se
+      espera `meses_maduracion` meses extra para capturar pagos tardios; si no, los
+      rezagos se etiquetarian como 0 y el modelo aprenderia a subestimar.
+    * Independientes: la renta del anio llega via SII (Operacion Renta) en junio del anio
+      siguiente; solo maduran los targets de anios ya declarados.
+    """
+    limite = add_months(snapshot_entrenamiento, -(cfg.meses_desfase + cfg.meses_maduracion))
+    anio_s, mes_s = snapshot_entrenamiento // 100, snapshot_entrenamiento % 100
+    anio_t = F.floor(F.col("periodo_target") / 100)
+    indep_maduro = (anio_t < anio_s - 1) | ((anio_t == anio_s - 1) & F.lit(mes_s >= 7))
+    return F.when(F.col("tipo_afiliado") == "INDEPENDIENTE", indep_maduro) \
+        .otherwise(F.col("periodo_target") <= limite)
+
+
 def dataset_entrenamiento(cfg: Config, feats: DataFrame, tablas: dict[str, DataFrame],
                           snapshot_entrenamiento: int) -> DataFrame:
     """Une features con la verdad CONOCIDA al momento de entrenar (sin mirar el futuro)."""
     verdad = rim_conocida(tablas["cotizaciones"], tablas["macro"], add_months(snapshot_entrenamiento, -1))
     return (features_para_entrenar(feats.filter(F.col("target_ya_conocido") == 0), verdad)
-            .filter(F.col("periodo_target") <= add_months(snapshot_entrenamiento, -cfg.meses_desfase)))
+            .filter(etiqueta_madura(cfg, snapshot_entrenamiento)))
 
 
 # ---------------------------------------------------------------- backtest
@@ -122,6 +139,8 @@ def backtest(spark: SparkSession, cfg: Config, tablas: dict[str, DataFrame], t0:
     _log(f"dataset test: {pred.count()} filas", t0)
 
     res = {
+        "calibracion": pd.DataFrame([{"horizonte": h, "umbral": modelo.umbrales[h], "smearing": modelo.smearing[h]}
+                                     for h in sorted(modelo.umbrales)]),
         "metricas": metricas(pred),
         "metricas_clasificador": metricas_clasificador(pred),
         "metricas_por_tipo": metricas(pred, ["tipo_afiliado"]),
@@ -167,6 +186,7 @@ def demo(cfg: Config, regenerar: bool = True) -> dict:
     res = backtest(spark, cfg, tablas, t0)
     for k, v in res.items():
         v.to_csv(f"{cfg.ruta_salida}/reportes/{k}.csv", index=False)
+    _imprimir("Calibracion (umbral y smearing por horizonte, sobre entrenamiento)", res["calibracion"])
     _imprimir("Backtest: modelo vs baselines (por horizonte)", res["metricas"])
     _imprimir("Backtest: clasificador cotiza / no cotiza", res["metricas_clasificador"])
     _imprimir("Backtest: por tipo de afiliado", res["metricas_por_tipo"][res["metricas_por_tipo"].predictor.isin(["rim_proyectada", "persistencia"])])

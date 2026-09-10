@@ -35,21 +35,21 @@ class Rubro:
 
 
 RUBROS: list[Rubro] = [
-    Rubro("A_AGRICULTURA", 0.10, 0.75, 0.15, 0.30, 0.10, 0.70, aguinaldo_medio=30_000),
-    Rubro("B_MINERIA", 0.03, 2.20, 0.25, 0.50, 0.02, 0.20, mes_bono=3, p_bono=0.7,
+    Rubro("A_AGRICULTURA", 0.10, 0.75, 0.10, 0.30, 0.10, 0.70, aguinaldo_medio=30_000),
+    Rubro("B_MINERIA", 0.03, 2.20, 0.15, 0.50, 0.02, 0.20, mes_bono=3, p_bono=0.7,
           aguinaldo_medio=250_000),
-    Rubro("C_MANUFACTURA", 0.10, 1.00, 0.10, 0.40, 0.035, 0.30, aguinaldo_medio=70_000),
-    Rubro("F_CONSTRUCCION", 0.12, 0.95, 0.20, 0.45, 0.09, 0.60, aguinaldo_medio=40_000),
-    Rubro("G_COMERCIO", 0.18, 0.85, 0.20, 0.35, 0.06, 0.40, aguinaldo_medio=50_000),
-    Rubro("H_TRANSPORTE", 0.06, 0.95, 0.15, 0.50, 0.045, 0.30, aguinaldo_medio=50_000),
-    Rubro("I_TURISMO", 0.05, 0.75, 0.15, 0.30, 0.08, 0.60, aguinaldo_medio=30_000),
-    Rubro("K_FINANZAS", 0.04, 1.80, 0.15, 0.10, 0.02, 0.10, mes_bono=3, p_bono=0.8,
+    Rubro("C_MANUFACTURA", 0.10, 1.00, 0.06, 0.40, 0.035, 0.30, aguinaldo_medio=70_000),
+    Rubro("F_CONSTRUCCION", 0.12, 0.95, 0.12, 0.45, 0.09, 0.60, aguinaldo_medio=40_000),
+    Rubro("G_COMERCIO", 0.18, 0.85, 0.12, 0.35, 0.06, 0.40, aguinaldo_medio=50_000),
+    Rubro("H_TRANSPORTE", 0.06, 0.95, 0.10, 0.50, 0.045, 0.30, aguinaldo_medio=50_000),
+    Rubro("I_TURISMO", 0.05, 0.75, 0.10, 0.30, 0.08, 0.60, aguinaldo_medio=30_000),
+    Rubro("K_FINANZAS", 0.04, 1.80, 0.10, 0.10, 0.02, 0.10, mes_bono=3, p_bono=0.8,
           aguinaldo_medio=150_000),
-    Rubro("N_SERVICIOS", 0.10, 0.80, 0.10, 0.30, 0.06, 0.50, aguinaldo_medio=35_000),
-    Rubro("O_ADMIN_PUBLICA", 0.07, 1.20, 0.03, 0.10, 0.012, 0.25, aguinaldo_medio=90_000),
-    Rubro("P_EDUCACION", 0.07, 1.00, 0.05, 0.10, 0.03, 0.40, aguinaldo_medio=60_000),
-    Rubro("Q_SALUD", 0.05, 1.15, 0.12, 0.40, 0.025, 0.30, aguinaldo_medio=70_000),
-    Rubro("T_CASA_PARTICULAR", 0.03, 0.65, 0.05, 0.05, 0.05, 0.10, aguinaldo_medio=20_000),
+    Rubro("N_SERVICIOS", 0.10, 0.80, 0.06, 0.30, 0.06, 0.50, aguinaldo_medio=35_000),
+    Rubro("O_ADMIN_PUBLICA", 0.07, 1.20, 0.02, 0.10, 0.012, 0.25, aguinaldo_medio=90_000),
+    Rubro("P_EDUCACION", 0.07, 1.00, 0.03, 0.10, 0.03, 0.40, aguinaldo_medio=60_000),
+    Rubro("Q_SALUD", 0.05, 1.15, 0.08, 0.40, 0.025, 0.30, aguinaldo_medio=70_000),
+    Rubro("T_CASA_PARTICULAR", 0.03, 0.65, 0.03, 0.05, 0.05, 0.10, aguinaldo_medio=20_000),
 ]
 
 # Estacionalidad explicita (terminos / contrataciones) por rubro
@@ -118,8 +118,9 @@ def generar_empleadores_pandas(cfg: Config) -> pd.DataFrame:
             "region_empleador": int(region[i]),
             "politica_gratificacion": "MENSUAL" if publico else politica_grat[i],
             "freq_reajuste": "ANUAL_DIC" if publico else freq_reajuste[i],
-            "aguinaldo_sep": float(rng.gamma(2.0, r.aguinaldo_medio / 2) * (rng.random() < 0.7)),
-            "aguinaldo_dic": float(rng.gamma(2.0, r.aguinaldo_medio / 2) * (rng.random() < 0.8)),
+            # aguinaldos imponibles solo en el sector privado (los del sector publico son no imponibles por ley)
+            "aguinaldo_sep": 0.0 if publico else float(rng.gamma(2.0, r.aguinaldo_medio / 2) * (rng.random() < 0.7)),
+            "aguinaldo_dic": 0.0 if publico else float(rng.gamma(2.0, r.aguinaldo_medio / 2) * (rng.random() < 0.8)),
             "factor_salarial_emp": float(np.exp(rng.normal(0, 0.15))),
             "p_pago_anticipado": 0.02 if publico else pa,
             "p_pago_oportuno": 0.97 if publico else po,
@@ -542,10 +543,16 @@ def generar_licencias(verdad: DataFrame) -> DataFrame:
                     col_add_months(F.col("periodo"), 1).cast("int").alias("periodo_recepcion")))
 
 
-def generar_afc_eventos(verdad: DataFrame) -> DataFrame:
-    """Eventos del Seguro de Cesantia (AFC): inicio y termino de relacion laboral, conocidos en m+1."""
+def generar_afc_eventos(verdad: DataFrame, empleadores: DataFrame) -> DataFrame:
+    """Eventos del Seguro de Cesantia (AFC): inicio y termino de relacion laboral, conocidos en m+1.
+
+    Los funcionarios publicos (estatuto administrativo) no estan afectos a AFC: no generan eventos.
+    """
+    privados = F.broadcast(empleadores.filter(F.col("rubro") != "O_ADMIN_PUBLICA").select("empleador_id"))
     return (verdad.filter(F.col("evento_afc").isNotNull())
+            .join(privados, "empleador_id", "inner")
             .select("afiliado_id", "periodo", "empleador_id", F.col("evento_afc").alias("tipo_evento"),
+                    F.when(F.col("evento_afc") == "INICIO", F.col("tipo_contrato")).alias("tipo_contrato"),
                     col_add_months(F.col("periodo"), 1).cast("int").alias("periodo_recepcion")))
 
 
@@ -563,6 +570,6 @@ def generar_todo(spark: SparkSession, cfg: Config) -> dict[str, DataFrame]:
         "verdad_mensual": verdad,
         "cotizaciones": cotizaciones,
         "licencias": generar_licencias(verdad),
-        "afc_eventos": generar_afc_eventos(verdad),
+        "afc_eventos": generar_afc_eventos(verdad, empleadores),
         "macro": macro_spark(spark, cfg.periodo_inicio, cfg.periodo_snapshot),
     }

@@ -20,20 +20,24 @@ from .calendario import add_months, col_periodo_to_idx, periodo_to_idx
 from .config import Config
 from .snapshot import conocidas_meses_abiertos, serie_conocida
 
-N_LAGS = 12
+N_LAGS = 13
 
 FEATURES_NUMERICAS = (
     [f"rim_l{k}" for k in range(1, N_LAGS + 1)]
     + ["media_3", "media_6", "media_12", "std_6", "max_12", "min_12",
        "n_cotiza_3", "n_cotiza_6", "n_cotiza_12", "meses_historia",
        "meses_desde_ult_cotiza", "meses_desde_cambio", "ratio_l1_media12", "tendencia_3_12",
-       "rim_ref", "rim_ref_sobre_imm", "rim_ref_sobre_tope", "rim_mismo_mes_ly", "ratio_ly_ref",
+       "racha_cotiza", "cv_6", "n_cambios_12", "sueldo_fijo", "ratio_l1_l2",
+       "al_tope_l1", "en_imm_l1", "dist_imm_l1", "pos_rel_empleador", "meses_hasta_pension",
+       "rim_ref", "ref_tipo", "rim_ref_sobre_imm", "rim_ref_sobre_tope", "rim_mismo_mes_ly", "ratio_ly_ref",
+       "ratio_estacional_ly",
        "meses_con_empleador", "n_empleadores_12", "n_pagadores_l1", "tiene_subsidio_l1", "tiene_dnp_l1",
        "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
        "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
        "meses_desde_afc_termino", "meses_desde_afc_inicio",
        "emp_n_trabajadores", "emp_crecimiento_12", "emp_rim_mediana", "emp_tasa_oportuno",
-       "emp_frac_declarado_corte", "emp_frac_declarado_h1", "sin_declaracion_con_emp_activo",
+       "emp_frac_declarado_corte", "emp_frac_declarado_h1", "emp_ratio_recibido_h1", "emp_tiene_recibido_h1",
+       "sin_declaracion_con_emp_activo", "rim_propia_conocida_h1", "flag_propia_conocida_h1",
        "edad", "meses_desde_afiliacion", "region",
        "horizonte", "mes_target", "es_enero", "es_marzo", "es_abril", "es_julio", "es_sept", "es_dic",
        "imm_target", "tope_target", "ratio_imm_target_corte", "ipc_12m_corte", "desempleo_corte"]
@@ -77,6 +81,8 @@ def _features_serie(serie: DataFrame, periodo_corte: int) -> DataFrame:
           .withColumn("_ini_racha_emp", F.max("_corte_emp").over(w_all))
           .withColumn("n_empleadores_12", F.size(F.array_distinct(F.collect_list("empleador_principal")
                                                                   .over(w.rowsBetween(-11, 0)))))
+          .withColumn("_ult_cero_idx", F.max(F.when(F.col("cotiza") == 0, F.col("periodo_idx"))).over(w_all))
+          .withColumn("n_cambios_12", F.sum("_cambio").over(w.rowsBetween(-11, 0)))
           )
     corte_idx = periodo_to_idx(periodo_corte)
     at_corte = (df.filter(F.col("periodo_idx") == corte_idx)
@@ -86,6 +92,15 @@ def _features_serie(serie: DataFrame, periodo_corte: int) -> DataFrame:
                 .withColumn("meses_con_empleador",
                             F.when(F.col("empleador_principal").isNull(), 0)
                             .otherwise(F.col("periodo_idx") - F.col("_ini_racha_emp") + 1))
+                .withColumn("racha_cotiza", F.when(F.col("cotiza") == 1,
+                                                   F.col("periodo_idx") - F.coalesce(F.col("_ult_cero_idx"),
+                                                                                     F.col("periodo_idx") - F.col("meses_historia")))
+                            .otherwise(0))
+                .withColumn("cv_6", F.col("std_6") / (F.col("media_6") + 1.0))
+                .withColumn("sueldo_fijo", ((F.col("rim_l1") > 0)
+                                            & (F.abs(F.col("rim_l1") - F.col("rim_l2")) <= 0.005 * F.col("rim_l1"))
+                                            & (F.abs(F.col("rim_l2") - F.col("rim_l3")) <= 0.005 * F.col("rim_l1"))).cast("int"))
+                .withColumn("ratio_l1_l2", F.col("rim_l1") / (F.col("rim_l2") + 1.0))
                 .withColumn("ratio_l1_media12", F.col("rim_l1") / (F.col("media_12") + 1.0))
                 .withColumn("tendencia_3_12", F.col("media_3") / (F.col("media_12") + 1.0))
                 .withColumn("n_pagadores_l1", F.col("n_pagadores"))
@@ -94,7 +109,8 @@ def _features_serie(serie: DataFrame, periodo_corte: int) -> DataFrame:
                 .withColumn("empleador_actual", F.col("empleador_principal")))
     cols = (["afiliado_id", "rim_ref", "empleador_ref", "empleador_actual", "meses_desde_ult_cotiza",
              "meses_desde_cambio", "meses_con_empleador", "n_empleadores_12", "ratio_l1_media12",
-             "tendencia_3_12", "n_pagadores_l1", "tiene_subsidio_l1", "tiene_dnp_l1"]
+             "tendencia_3_12", "n_pagadores_l1", "tiene_subsidio_l1", "tiene_dnp_l1",
+             "racha_cotiza", "cv_6", "n_cambios_12", "sueldo_fijo", "ratio_l1_l2"]
             + [f"rim_l{k}" for k in range(1, N_LAGS + 1)]
             + ["media_3", "media_6", "media_12", "std_6", "max_12", "min_12", "n_cotiza_3", "n_cotiza_6",
                "n_cotiza_12", "meses_historia"])
@@ -126,6 +142,15 @@ def _features_empleador(serie: DataFrame, cotizaciones: DataFrame, conocidas_abi
     frac_h1 = (act_corte.join(decl_h1, "afiliado_id", "left")
                .groupBy("empleador_principal")
                .agg(F.avg(F.coalesce(F.col("_decl"), F.lit(0))).alias("emp_frac_declarado_h1")))
+    # entre los companeros ya recibidos para corte+1: mediana de RIM(corte+1) / RIM(corte)
+    rim_corte = serie.filter((F.col("periodo_idx") == corte_idx) & (F.col("rim") > 0)) \
+        .select("afiliado_id", "empleador_principal", F.col("rim").alias("_rim_corte"))
+    rec_h1 = (conocidas_abiertas.filter(F.col("periodo") == add_months(periodo_corte, 1))
+              .select("afiliado_id", F.col("rim").alias("_rim_h1"))
+              .join(rim_corte, "afiliado_id")
+              .groupBy("empleador_principal")
+              .agg(F.expr("percentile_approx(_rim_h1 / _rim_corte, 0.5)").alias("emp_ratio_recibido_h1"))
+              .withColumn("emp_tiene_recibido_h1", F.lit(1)))
     # puntualidad historica del empleador (fraccion de declaraciones recibidas en m+1 o antes)
     ult12 = add_months(periodo_corte, -11)
     punt = (cotizaciones
@@ -138,6 +163,7 @@ def _features_empleador(serie: DataFrame, cotizaciones: DataFrame, conocidas_abi
     emp = (en_corte.join(hace_12, "empleador_principal", "left")
            .join(frac_corte, "empleador_principal", "left")
            .join(frac_h1, "empleador_principal", "left")
+           .join(rec_h1, "empleador_principal", "left")
            .join(punt, "empleador_principal", "left")
            .withColumn("emp_crecimiento_12", F.col("emp_n_trabajadores") / (F.coalesce(F.col("_n_12"), F.lit(0)) + 1.0))
            .drop("_n_12")
@@ -156,7 +182,12 @@ def _features_eventos(afc: DataFrame, licencias: DataFrame, periodo_corte: int, 
                   F.max(F.when((F.col("tipo_evento") == "INICIO") & (F.col("_d") == 0), 1).otherwise(0)).alias("afc_inicio_l1"),
                   F.max(F.when((F.col("tipo_evento") == "INICIO") & (F.col("_d") == 1), 1).otherwise(0)).alias("afc_inicio_l2"),
                   F.min(F.when(F.col("tipo_evento") == "TERMINO", F.col("_d"))).alias("meses_desde_afc_termino"),
-                  F.min(F.when(F.col("tipo_evento") == "INICIO", F.col("_d"))).alias("meses_desde_afc_inicio")))
+                  F.min(F.when(F.col("tipo_evento") == "INICIO", F.col("_d"))).alias("meses_desde_afc_inicio"),
+                  # empleador del inicio de relacion laboral mas reciente (cold start: aun sin cotizacion)
+                  F.expr("min_by(CASE WHEN tipo_evento = 'INICIO' THEN empleador_id END, "
+                         "CASE WHEN tipo_evento = 'INICIO' THEN _d END)").alias("afc_empleador_inicio"),
+                  F.expr("min_by(CASE WHEN tipo_evento = 'INICIO' THEN tipo_contrato END, "
+                         "CASE WHEN tipo_evento = 'INICIO' THEN _d END)").alias("afc_tipo_contrato")))
     lic_k = (licencias.filter(F.col("periodo_recepcion") <= hasta_recepcion)
              .withColumn("_d", F.lit(corte_idx) - col_periodo_to_idx(F.col("periodo")))
              .filter(F.col("_d").isin(0, 1))
@@ -195,28 +226,34 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
 
     base = (dim_af.filter(col_periodo_to_idx(F.col("periodo_afiliacion")) <= periodo_to_idx(corte) + max(cfg.horizontes))
             .join(f_serie, "afiliado_id", "left")
-            .join(f_emp, "empleador_ref", "left")
-            .join(dim_emp, "empleador_ref", "left")
             .join(f_afc, "afiliado_id", "left")
-            .join(f_lic, "afiliado_id", "left"))
+            .join(f_lic, "afiliado_id", "left")
+            # sin cotizacion conocida pero con aviso AFC de inicio: se usa ese empleador como referencia
+            .withColumn("empleador_ref", F.coalesce(F.col("empleador_ref"), F.col("afc_empleador_inicio")))
+            .join(f_emp, "empleador_ref", "left")
+            .join(dim_emp, "empleador_ref", "left"))
 
-    # tipo de contrato conocido: se infiere del ultimo evento AFC / no esta en cotizaciones.
-    # En la simulacion no se expone al modelo el contrato latente; se usa proxy por antiguedad.
+    # tipo de contrato: lo informa el empleador a la AFC al iniciar la relacion laboral; si la
+    # relacion empezo antes de la historia disponible no hay dato.
     base = base.withColumn("tipo_contrato", F.when(F.col("empleador_actual").isNull(), "SIN_EMPLEADOR")
-                           .when(F.col("meses_con_empleador") < 12, "RECIENTE").otherwise("ANTIGUO"))
+                           .otherwise(F.coalesce(F.col("afc_tipo_contrato"), F.lit("SIN_DATO_AFC"))))
 
     filas = []
     for h in cfg.horizontes:
         target = add_months(corte, h)
         m_t = macro_p.loc[target]
         mes_t = target % 100
-        ly = F.col(f"rim_l{13 - h}") if 13 - h <= N_LAGS else F.lit(None)   # valor en target-12
+        ly = F.col(f"rim_l{13 - h}")                     # valor en target-12
+        ly_prev = F.col(f"rim_l{14 - h}")                # valor en target-13
         filas.append(
             base.withColumn("horizonte", F.lit(h))
             .withColumn("periodo_target", F.lit(target))
             .withColumn("mes_target", F.lit(mes_t))
             .withColumn("rim_mismo_mes_ly", ly)
+            .withColumn("ratio_estacional_ly", ly / (ly_prev + 1.0))   # salto estacional individual del anio anterior
             .withColumn("imm_target", F.lit(float(m_t["imm"])))
+            .withColumn("imm_corte", F.lit(float(m_corte["imm"])))
+            .withColumn("tope_corte", F.lit(float(m_corte["tope_clp"])))
             .withColumn("tope_target", F.lit(float(m_t["tope_clp"])))
             .withColumn("ratio_imm_target_corte", F.lit(float(m_t["imm"]) / float(m_corte["imm"])))
             .withColumn("ipc_12m_corte", F.lit(float(m_corte["ipc_12m"])))
@@ -228,18 +265,38 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
         df = df.unionByName(extra)
 
     ya_conocido = abiertas.select("afiliado_id", F.col("periodo").alias("periodo_target"),
-                                  F.col("rim").alias("rim_ya_conocida"))
+                                  F.col("rim").alias("rim_ya_conocida"),
+                                  F.col("n_pagadores").alias("n_pagadores_ya_conocidos"))
+    # observacion parcial PROPIA del mes corte+1 (pago anticipado): informa a las filas h=2.
+    # Para h=1 el target es ese mismo mes y la fila se excluye del scoring si ya se conoce,
+    # por lo que la feature vale 0 en toda fila h=1 que se predice (sin leakage).
+    propia_h1 = (abiertas.filter(F.col("periodo") == add_months(corte, 1))
+                 .select("afiliado_id", F.col("rim").alias("rim_propia_conocida_h1"),
+                         F.lit(1).alias("flag_propia_conocida_h1")))
     df = (df.join(ya_conocido, ["afiliado_id", "periodo_target"], "left")
+          .join(propia_h1, "afiliado_id", "left")
+          .withColumn("rim_propia_conocida_h1", F.when(F.col("horizonte") == 2, F.col("rim_propia_conocida_h1")))
+          .withColumn("flag_propia_conocida_h1", F.when(F.col("horizonte") == 2, F.col("flag_propia_conocida_h1")))
           .withColumn("target_ya_conocido", F.col("rim_ya_conocida").isNotNull().cast("int"))
           .withColumn("periodo_snapshot", F.lit(periodo_snapshot))
           .withColumn("periodo_corte", F.lit(corte))
           .withColumn("edad", F.col("edad_inicio") + F.floor((F.lit(periodo_to_idx(corte)) + F.col("horizonte")
                                                              - F.lit(periodo_to_idx(cfg.periodo_inicio))) / 12))
           .withColumn("meses_desde_afiliacion", F.lit(periodo_to_idx(corte)) - col_periodo_to_idx(F.col("periodo_afiliacion")))
-          .withColumn("rim_ref_safe", F.coalesce(F.col("rim_ref"), F.col("imm_target")))
+          # referencia con jerarquia de fallback: propia -> mediana del empleador -> IMM (cold start)
+          .withColumn("ref_tipo", F.when(F.col("rim_ref").isNotNull(), 0)
+                      .when(F.col("emp_rim_mediana") > 0, 1).otherwise(2))
+          .withColumn("rim_ref_safe", F.coalesce(F.col("rim_ref"),
+                                                 F.when(F.col("emp_rim_mediana") > 0, F.col("emp_rim_mediana")),
+                                                 F.col("imm_target")))
           .withColumn("rim_ref_sobre_imm", F.col("rim_ref_safe") / F.col("imm_target"))
           .withColumn("rim_ref_sobre_tope", F.col("rim_ref_safe") / F.col("tope_target"))
           .withColumn("ratio_ly_ref", F.col("rim_mismo_mes_ly") / F.col("rim_ref_safe"))
+          .withColumn("al_tope_l1", (F.col("rim_l1") >= 0.99 * F.col("tope_corte")).cast("int"))
+          .withColumn("en_imm_l1", (F.abs(F.col("rim_l1") - F.col("imm_corte")) < 0.02 * F.col("imm_corte")).cast("int"))
+          .withColumn("dist_imm_l1", (F.col("rim_l1") - F.col("imm_corte")) / F.col("imm_corte"))
+          .withColumn("pos_rel_empleador", F.col("rim_l1") / (F.col("emp_rim_mediana") + 1.0))
+          .withColumn("meses_hasta_pension", (F.when(F.col("sexo") == "F", 60).otherwise(65) - F.col("edad")) * 12)
           .withColumn("sin_declaracion_con_emp_activo",
                       F.when((F.col("rim_l1") == 0) & (F.col("rim_l2") > 0)
                              & (F.col("emp_frac_declarado_corte") >= 0.8), 1).otherwise(0))
@@ -255,21 +312,25 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
     rellenos = {c: 0.0 for c in [f"rim_l{k}" for k in range(1, N_LAGS + 1)]
                 + ["media_3", "media_6", "media_12", "std_6", "max_12", "min_12", "rim_mismo_mes_ly", "ratio_ly_ref",
                    "ratio_l1_media12", "tendencia_3_12", "emp_frac_declarado_corte", "emp_frac_declarado_h1",
-                   "emp_crecimiento_12", "emp_rim_mediana", "emp_tasa_oportuno"]}
+                   "emp_crecimiento_12", "emp_rim_mediana", "emp_tasa_oportuno", "cv_6", "ratio_l1_l2",
+                   "ratio_estacional_ly", "dist_imm_l1", "pos_rel_empleador"]}
     rellenos.update({c: 0 for c in ["n_cotiza_3", "n_cotiza_6", "n_cotiza_12", "meses_historia", "meses_con_empleador",
                                     "n_empleadores_12", "n_pagadores_l1", "tiene_subsidio_l1", "tiene_dnp_l1",
                                     "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
                                     "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
-                                    "emp_n_trabajadores"]})
+                                    "emp_n_trabajadores", "n_pagadores_ya_conocidos", "racha_cotiza",
+                                    "n_cambios_12", "sueldo_fijo", "al_tope_l1", "en_imm_l1",
+                                    "emp_tiene_recibido_h1", "rim_propia_conocida_h1", "flag_propia_conocida_h1"]})
     rellenos.update({"meses_desde_ult_cotiza": 99, "meses_desde_cambio": 99, "meses_desde_afc_termino": 99,
-                     "meses_desde_afc_inicio": 99, "rim_ref": 0.0,
+                     "meses_desde_afc_inicio": 99, "rim_ref": 0.0, "emp_ratio_recibido_h1": 1.0,
                      "rubro": "SIN_EMPLEADOR", "tamano_empleador": "SIN_EMPLEADOR"})
     df = df.fillna(rellenos)
     for c in FEATURES_NUMERICAS:
         df = df.withColumn(c, F.col(c).cast("double"))
     if materializar:
-        df = df.cache()
-        df.count()
+        # checkpoint local: materializa y CORTA el linaje (el plan de ~100 columnas con 13 lags y
+        # varias windows es enorme; en produccion equivale a escribir la tabla de features)
+        df = df.localCheckpoint(eager=True)
         serie.unpersist()
         abiertas.unpersist()
     return df
@@ -281,4 +342,6 @@ def features_para_entrenar(features: DataFrame, verdad: DataFrame) -> DataFrame:
     return (features.join(y, ["afiliado_id", "periodo_target"], "left")
             .fillna({"rim_real": 0.0})
             .withColumn("y_cls", (F.col("rim_real") > 0).cast("double"))
-            .withColumn("y_reg", F.log(F.col("rim_real") / F.col("rim_ref_safe"))))
+            # log-ratio winsorizado: evita que ratios extremos (errores de planilla) dominen el regresor
+            .withColumn("y_reg", F.greatest(F.lit(-3.0), F.least(F.lit(2.0),
+                                                                 F.log(F.col("rim_real") / F.col("rim_ref_safe"))))))

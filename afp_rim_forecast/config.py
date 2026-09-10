@@ -22,10 +22,11 @@ class Config:
     horizontes: tuple[int, ...] = (1, 2)
 
     # --- Entrenamiento -----------------------------------------------------
-    n_snapshots_entrenamiento: int = 18        # origenes moviles usados para entrenar
-    gap_entrenamiento: int = 3                 # snapshot_train <= snapshot_test - gap (targets conocidos)
-    n_snapshots_test: int = 3                  # origenes reservados para backtest
-    gbt_max_iter: int = 60
+    n_snapshots_entrenamiento: int = 12        # origenes moviles usados para entrenar
+    gap_entrenamiento: int = 4                 # snapshot_train <= snapshot_test - gap (= desfase + maduracion)
+    meses_maduracion: int = 2                  # meses extra de espera para pagos tardios y subsidios
+    n_snapshots_test: int = 2                  # origenes reservados para backtest
+    gbt_max_iter: int = 40
     gbt_max_depth: int = 5
     gbt_step_size: float = 0.1
     gbt_subsampling: float = 0.8

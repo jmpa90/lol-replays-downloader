@@ -11,6 +11,8 @@ def get_spark(app_name: str = "afp-rim-forecast", shuffle_partitions: int = 16,
         .config("spark.sql.shuffle.partitions", str(shuffle_partitions))
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         .config("spark.sql.adaptive.enabled", "true")
+        # los planes de features son muy anchos: acotar el string del plan evita OOM en el driver al loguear
+        .config("spark.sql.maxPlanStringLength", "1000000")
         .config("spark.ui.showConsoleProgress", "false")
         .config("spark.ui.enabled", "false")
         .config("spark.driver.memory", driver_memory)

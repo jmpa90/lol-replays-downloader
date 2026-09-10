@@ -2,7 +2,8 @@
 
 Ciclo mensual (snapshot nuevo = T+1):
   1. `reconciliar`: las filas PREDICHA cuyo periodo ya tiene cotizacion recibida pasan a
-     REAL (detalle PAGO o REZAGO segun cuanto tardo). Una fila REAL cuyo monto cambio
+     REAL (detalle PAGO o PAGO_TARDIO segun cuanto tardo; en jerga AFP "rezago" es otra cosa:
+     una cotizacion recibida que no pudo imputarse al afiliado). Una fila REAL cuyo monto cambio
      (rectificacion, segundo empleador que pago tarde) se actualiza (detalle RECTIFICACION).
      Un periodo "cerrado" (mas alla de la ventana de rezago) sin cotizacion se fija en 0
      (detalle SIN_COTIZACION); si despues llega un rezago, vuelve a actualizarse.
@@ -58,7 +59,7 @@ def reconciliar(proyecciones: DataFrame, cotizaciones: DataFrame, macro: DataFra
     detalle_nuevo = (F.when(rectifica, "RECTIFICACION")
                      .when(cierra_en_cero, "SIN_COTIZACION")
                      .when(pasa_a_real & (F.col("_lag_min") <= 1), "PAGO")
-                     .when(pasa_a_real, "REZAGO"))
+                     .when(pasa_a_real, "PAGO_TARDIO"))
     out = (df
            .withColumn("rim_predicha_previa",
                        F.when((pasa_a_real | cierra_en_cero) & F.col("rim_predicha_previa").isNull(), F.col("rim_valor"))

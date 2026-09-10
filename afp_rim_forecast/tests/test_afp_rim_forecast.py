@@ -18,7 +18,7 @@ from afp_rim_forecast.synthetic import generar_todo
 
 @pytest.fixture(scope="session")
 def spark():
-    s = get_spark("tests", shuffle_partitions=4, master="local[2]", driver_memory="2g")
+    s = get_spark("tests", shuffle_partitions=4, master="local[2]", driver_memory="3g")
     yield s
     s.stop()
 
@@ -153,7 +153,8 @@ def test_modelo_proyeccion_y_reconciliacion(spark, cfg, tablas):
     assert chk.filter("r is not null and origen <> 'REAL'").count() == 0
     assert chk.filter("r is not null and rim_valor <> r").count() == 0
     assert chk.filter("r is null and origen = 'REAL' and detalle_origen <> 'PAGO_ANTICIPADO'").count() == 0
-    assert rec.filter("origen = 'REAL' and detalle_origen in ('PAGO','REZAGO') and rim_predicha_previa is null").count() == 0
+    assert proy.filter("origen = 'PREDICHA' and detalle_origen = 'PARCIAL' and rim_valor < 0").count() == 0
+    assert rec.filter("origen = 'REAL' and detalle_origen in ('PAGO','PAGO_TARDIO') and rim_predicha_previa is null").count() == 0
     # idempotencia
     rec2 = reconciliar(rec, tablas["cotizaciones"], tablas["macro"], s2, cfg.meses_desfase)
     assert rec2.exceptAll(rec).count() == 0 and rec.exceptAll(rec2).count() == 0

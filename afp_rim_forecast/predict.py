@@ -25,15 +25,27 @@ def proyectar(cfg: Config, tablas: dict[str, DataFrame], modelo: HurdleModel, pe
     spark = tablas["afiliados"].sparkSession
     if features is None:
         features = construir_features(spark, cfg, tablas, periodo_snapshot)
-    pred = modelo.transform(features.filter(F.col("target_ya_conocido") == 0))
+    # Un mes abierto esta "completo" si ya llegaron tantos pagadores como tenia el afiliado en el
+    # ultimo mes conocido; si llego solo uno de varios empleadores, es un pago PARCIAL: se predice
+    # el total y se toma al menos lo ya recibido.
+    completo = (F.col("target_ya_conocido") == 1) & \
+        (F.col("n_pagadores_ya_conocidos") >= F.greatest(F.col("n_pagadores_l1"), F.lit(1.0)))
+    features = features.withColumn("_completo", completo.cast("int"))
+    pred = modelo.transform(features.filter(F.col("_completo") == 0))
+    parcial = F.col("target_ya_conocido") == 1
     predichas = (pred.select(
         "afiliado_id", F.col("periodo_target").alias("periodo"), F.col("horizonte").cast("int"),
-        F.col("rim_proyectada").alias("rim_valor"), F.lit("PREDICHA").alias("origen"),
-        F.lit("MODELO").alias("detalle_origen"), "prob_cotiza", "rim_condicional", "rim_esperada",
+        F.when(parcial, F.greatest(F.col("rim_proyectada"), F.col("rim_ya_conocida")))
+        .otherwise(F.col("rim_proyectada")).alias("rim_valor"),
+        F.lit("PREDICHA").alias("origen"),
+        F.when(parcial, "PARCIAL").otherwise("MODELO").alias("detalle_origen"),
+        "prob_cotiza", "rim_condicional",
+        F.when(parcial, F.greatest(F.col("rim_esperada"), F.col("rim_ya_conocida")))
+        .otherwise(F.col("rim_esperada")).alias("rim_esperada"),
         F.lit(None).cast("double").alias("rim_predicha_previa"),
         F.lit(periodo_snapshot).alias("periodo_snapshot"), F.lit(None).cast("int").alias("periodo_reemplazo"),
         F.lit(modelo.version).alias("version_modelo"), F.lit(fecha_calculo).alias("fecha_calculo")))
-    reales = (features.filter(F.col("target_ya_conocido") == 1).select(
+    reales = (features.filter(F.col("_completo") == 1).select(
         "afiliado_id", F.col("periodo_target").alias("periodo"), F.col("horizonte").cast("int"),
         F.col("rim_ya_conocida").alias("rim_valor"), F.lit("REAL").alias("origen"),
         F.lit("PAGO_ANTICIPADO").alias("detalle_origen"), F.lit(1.0).alias("prob_cotiza"),

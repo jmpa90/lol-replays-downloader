@@ -74,16 +74,17 @@ construcción).
 
 | Familia | Features | Por qué importa |
 |---|---|---|
-| Historia propia | `rim_l1..rim_l12` (l1 = mes de corte), `media_3/6/12`, `std_6`, `max_12`, `min_12`, `n_cotiza_3/6/12` (densidad), `meses_historia`, `meses_desde_ult_cotiza`, `meses_desde_cambio`, `ratio_l1_media12`, `tendencia_3_12` | La RIM es muy persistente; la densidad y el tiempo desde el último cambio capturan estabilidad laboral |
-| Referencia | `rim_ref` (última RIM > 0), `rim_ref_sobre_imm`, `rim_ref_sobre_tope`, `rim_mismo_mes_ly` (valor en target-12), `ratio_ly_ref` | El target del regresor es `log(RIM_target / rim_ref)`; el mismo mes del año anterior captura aguinaldos, gratificación anual, bono de marzo |
-| Relación laboral | `meses_con_empleador`, `n_empleadores_12`, `n_pagadores_l1`, `tiene_subsidio_l1`, `tiene_dnp_l1`, `tipo_contrato` (proxy por antigüedad) | Rotación y multiempleo |
-| Señales adelantadas | `afc_termino_l1/l2`, `afc_inicio_l1/l2`, `meses_desde_afc_termino/inicio`, `dias_licencia_l1/l2`, `licencia_en_curso` | Un término AFC en el mes de corte implica RIM 0 el mes siguiente aunque el corte tenga RIM > 0 |
-| Empleador | `rubro`, `tamano_empleador`, `emp_n_trabajadores`, `emp_crecimiento_12`, `emp_rim_mediana`, `emp_tasa_oportuno`, `emp_frac_declarado_corte`, `emp_frac_declarado_h1`, `sin_declaracion_con_emp_activo` | Si el empleador ya declaró el mes para el 90 % de sus trabajadores y no para este afiliado, es más probable un finiquito que un rezago; `emp_frac_declarado_h1` usa los pagos anticipados ya recibidos para el mes abierto |
-| Afiliado | `tipo_afiliado`, `sexo`, `edad`, `region`, `nivel_educacional`, `meses_desde_afiliacion` | Segmentos con dinámicas distintas (independientes, voluntarios, pensionados, cold start) |
+| Historia propia | `rim_l1..rim_l13` (l1 = mes de corte), `media_3/6/12`, `std_6`, `cv_6`, `max_12`, `min_12`, `n_cotiza_3/6/12` (densidad), `racha_cotiza`, `meses_historia`, `meses_desde_ult_cotiza`, `meses_desde_cambio`, `n_cambios_12`, `sueldo_fijo`, `ratio_l1_l2`, `ratio_l1_media12`, `tendencia_3_12`, `al_tope_l1`, `en_imm_l1`, `dist_imm_l1` | La RIM es muy persistente; densidad, rachas y tiempo desde el último cambio capturan estabilidad laboral; los flags de tope e IMM marcan los tramos que se mueven por ley |
+| Referencia | `rim_ref` (última RIM > 0 → mediana del empleador → IMM, con `ref_tipo`), `rim_ref_sobre_imm`, `rim_ref_sobre_tope`, `rim_mismo_mes_ly` (valor en target-12), `ratio_ly_ref`, `ratio_estacional_ly` (salto target-12 / target-13) | El target del regresor es `log(RIM_target / rim_ref)`; el mismo mes del año anterior captura aguinaldos, gratificación anual, bono de marzo |
+| Relación laboral | `meses_con_empleador`, `n_empleadores_12`, `n_pagadores_l1`, `tiene_subsidio_l1`, `tiene_dnp_l1`, `tipo_contrato` (informado a la AFC al iniciar la relación) | Rotación, multiempleo y contratos a plazo |
+| Señales adelantadas | `afc_termino_l1/l2`, `afc_inicio_l1/l2`, `meses_desde_afc_termino/inicio`, `dias_licencia_l1/l2`, `licencia_en_curso`, `rim_propia_conocida_h1` / `flag_propia_conocida_h1` (sólo filas h=2: el propio mes corte+1 ya recibido) | Un término AFC en el mes de corte implica RIM 0 el mes siguiente aunque el corte tenga RIM > 0; si la relación empezó en el corte y aún no hay planilla, el empleador del aviso AFC sirve de referencia (cold start) |
+| Empleador | `rubro`, `tamano_empleador`, `emp_n_trabajadores`, `emp_crecimiento_12`, `emp_rim_mediana`, `pos_rel_empleador`, `emp_tasa_oportuno`, `emp_frac_declarado_corte`, `emp_frac_declarado_h1`, `emp_ratio_recibido_h1`, `sin_declaracion_con_emp_activo` | Si el empleador ya declaró el mes para el 90 % de sus trabajadores y no para este afiliado, es más probable un finiquito que un pago tardío; los compañeros ya recibidos para el mes abierto anticipan reajustes y aguinaldos de ese empleador |
+| Afiliado | `tipo_afiliado`, `sexo`, `edad`, `meses_hasta_pension`, `region`, `nivel_educacional`, `meses_desde_afiliacion` | Segmentos con dinámicas distintas (independientes, voluntarios, pensionados, cold start) |
 | Calendario y macro | `horizonte`, `mes_target`, `es_enero/marzo/abril/julio/sept/dic`, `imm_target`, `tope_target`, `ratio_imm_target_corte`, `ipc_12m_corte`, `desempleo_corte` | Estacionalidad legal (aguinaldos, gratificación, reajustes) y cambios del IMM ya legislados |
 
 Filas ya conocidas para un mes abierto (empleadores que pagan anticipado) **no se predicen**: entran como
-`REAL / PAGO_ANTICIPADO`.
+`REAL / PAGO_ANTICIPADO`. Si sólo llegó una parte de los pagadores esperados (multiempleo, subsidio pendiente) la
+fila es `PREDICHA / PARCIAL`: se predice el total y se toma al menos lo ya recibido.
 
 ## 4. Modelo (`model.py`)
 
@@ -97,10 +98,13 @@ sin renta):
 
 Salidas por afiliado y mes abierto:
 
-* `rim_condicional = rim_ref · exp(ŷ)` topada al tope imponible del mes.
-* `rim_esperada = prob_cotiza · rim_condicional` → para **agregados** (recaudación proyectada, flujo de fondos).
-* `rim_proyectada = rim_condicional si prob_cotiza ≥ 0,5, si no 0` → para el **dato individual** que se
-  escribe en la cuenta hasta que llegue el real.
+* `rim_condicional = rim_ref · exp(ŷ)` topada al tope imponible del mes (ŷ winsorizado a [-3, 2] al entrenar).
+* `rim_esperada = prob_cotiza · rim_condicional · s_h` → para **agregados** (recaudación proyectada, flujo de
+  fondos); `s_h` es un factor de *smearing* por horizonte (Σ real / Σ p·rim_cond en entrenamiento) que corrige el
+  sesgo de estimar una mediana con pérdida absoluta.
+* `rim_proyectada = rim_condicional si prob_cotiza ≥ τ_h, si no 0` → para el **dato individual** que se
+  escribe en la cuenta hasta que llegue el real; `τ_h` se elige por horizonte minimizando el WAPE en
+  entrenamiento (nunca en test). Ambos parámetros se guardan con el modelo (`calibracion.json`).
 
 Un horizonte es una feature (`horizonte` ∈ {1, 2}) y cada afiliado aporta dos filas por snapshot, lo que
 comparte información entre horizontes sin duplicar modelos. Las categóricas pasan por `StringIndexer`
@@ -110,10 +114,14 @@ comparte información entre horizontes sin duplicar modelos. Las categóricas pa
 ## 5. Evaluación (`evaluate.py`, `pipeline.backtest`)
 
 * **Orígenes móviles**: se entrena con `n_snapshots_entrenamiento` snapshots anteriores a
-  `test - gap_entrenamiento` (gap de 3 meses para que los targets de entrenamiento estén realmente
-  conocidos al entrenar) y se evalúa en los `n_snapshots_test` últimos.
-* La verdad de entrenamiento es la **conocida al momento de entrenar** (`rim_conocida(hasta = test-1)`);
-  la verdad de evaluación es la final.
+  `test - gap_entrenamiento` y se evalúa en los `n_snapshots_test` últimos.
+* La verdad de entrenamiento es la **conocida al momento de entrenar** (`rim_conocida(hasta = test-1)`) y sólo
+  entran filas con **etiqueta madura** (`pipeline.etiqueta_madura`): para dependientes el target debe tener al
+  menos `meses_desfase + meses_maduracion` meses (4) para que hayan llegado pagos tardíos y subsidios; para
+  independientes sólo cuentan los años cuya Operación Renta ya llegó. Sin esta regla los pagos que aún no
+  llegan se etiquetan como 0 y el modelo aprende a subestimar (en la primera corrida del demo esto llevó a
+  predecir 0 para todos los independientes).
+* La verdad de evaluación es la final (lo que terminó llegando).
 * **Baselines** que hay que superar: persistencia (`rim_l1`), media de 3 meses, estacional
   (mismo mes del año anterior reajustado por la variación del IMM).
 * **Métricas** por horizonte, tipo de afiliado, tramo de renta y snapshot: MAE, RMSE, **WAPE**
@@ -128,7 +136,7 @@ Tabla `rim_proyectada` (una fila por afiliado y periodo abierto):
 |---|---|
 | `rim_valor` | Valor vigente (predicho o real) |
 | `origen` | `PREDICHA` / `REAL` |
-| `detalle_origen` | `MODELO`, `PAGO_ANTICIPADO`, `PAGO`, `REZAGO`, `RECTIFICACION`, `SIN_COTIZACION` |
+| `detalle_origen` | `MODELO`, `PARCIAL`, `PAGO_ANTICIPADO`, `PAGO`, `PAGO_TARDIO`, `RECTIFICACION`, `SIN_COTIZACION` |
 | `prob_cotiza`, `rim_condicional`, `rim_esperada` | Salidas del modelo |
 | `rim_predicha_previa` | Lo que decía el modelo antes del reemplazo (monitoreo del error) |
 | `periodo_snapshot`, `periodo_reemplazo`, `version_modelo`, `fecha_calculo` | Trazabilidad |
@@ -136,9 +144,10 @@ Tabla `rim_proyectada` (una fila por afiliado y periodo abierto):
 Ciclo mensual en el snapshot T+1:
 
 1. `reconciliar`: las PREDICHA cuyo periodo ya tiene cotización recibida pasan a REAL (`PAGO` si llegó en
-   m+1, `REZAGO` si tardó más); una REAL cuyo monto cambió (rectificación, segundo empleador que pagó tarde)
-   se actualiza; un periodo más allá de la ventana de rezago sin cotización se fija en 0
-   (`SIN_COTIZACION`) y si después llega un rezago vuelve a actualizarse. Idempotente.
+   m+1, `PAGO_TARDIO` si tardó más); una REAL cuyo monto cambió (rectificación, segundo empleador que pagó tarde)
+   se actualiza; un periodo más allá de la ventana de pagos tardíos sin cotización se fija en 0
+   (`SIN_COTIZACION`) y si después llega un pago tardío vuelve a actualizarse. Idempotente. (En jerga AFP
+   "rezago" es una cotización recibida que no se pudo imputar al afiliado; aquí no se modela.)
 2. `actualizar_proyecciones`: MERGE con las nuevas proyecciones — REAL gana a PREDICHA y entre PREDICHAS gana
    el snapshot más nuevo (el h=2 del mes pasado pasa a h=1 con más información).
 3. `reporte_reemplazos`: error del modelo sobre las filas recién reemplazadas (MAE, WAPE, sesgo, exactitud
