@@ -203,13 +203,53 @@ afp_rim_forecast/
 
 ## 10. Resultados del demo
 
-*(se completan con la corrida de `demo`; ver `reportes/`)*
+Corrida de referencia: `python -m afp_rim_forecast.pipeline demo` con la configuración por defecto
+(5.000 afiliados, 2022-01 a 2026-09, 12 orígenes de entrenamiento, GBT de 40 iteraciones; ~12 min en un
+laptop de 4 núcleos). Backtest sobre los snapshots 2026-08 y 2026-09 (19.627 filas afiliado × horizonte).
+
+| Predictor | WAPE h=1 | WAPE h=2 | Sesgo agregado h=1 | Exactitud cero/no-cero h=1 |
+|---|---|---|---|---|
+| Persistencia (`rim_l1`) | 0,312 | 0,359 | -17,6 % | 0,817 |
+| Media 3 meses | 0,318 | 0,353 | -12,0 % | 0,815 |
+| Estacional (mismo mes año anterior) | 0,395 | 0,400 | +13,9 % | 0,798 |
+| **Modelo, dato individual** (`rim_proyectada`) | **0,196** | **0,258** | -4,1 % | **0,926** |
+| **Modelo, agregados** (`rim_esperada`) | 0,226 | 0,287 | **+1,6 %** | 0,718 |
+
+* Clasificador cotiza / no cotiza: AUC 0,969 (h=1) y 0,918 (h=2); Brier 0,055 / 0,094.
+* Dependientes (80 % de la cartera): WAPE 0,115 (h=1) y 0,182 (h=2) frente a 0,215 / 0,265 de la
+  persistencia; sesgo -2,6 %. Por tramo de renta el modelo gana en todos los tramos y horizontes.
+* Umbral calibrado τ = 0,70 en ambos horizontes (un falso positivo cuesta la RIM completa, por eso conviene
+  exigir más certeza que 0,5); smearing s ≈ 1,04.
+* Puntos débiles esperables: voluntarios (cotizan al azar un 25 % de los meses: la predicción puntual
+  correcta es 0 y sólo `rim_esperada` aporta) e independientes (en la simulación la renta anual se redibuja
+  cada año; el modelo acierta el nivel del año anterior, WAPE 0,85).
+* Features más importantes: posición relativa a la mediana del empleador, sueldo fijo, rubro, coeficiente
+  de variación, ratio último/penúltimo mes, meses desde el término AFC, media de 3 meses, desempleo,
+  tipo de afiliado, densidad de cotización reciente, edad, días de licencia.
+
+Ciclo mensual simulado (snapshot 2026-10): de las 4.820 filas de agosto predichas por el modelo llegaron
+2.834 pagos, 59 declaraciones sin pago (DNP) y 7 complementos de un segundo pagador; el error del modelo
+sobre las filas reemplazadas de dependientes fue WAPE 0,125 con sesgo -2,2 % y 95 % de acierto cero/no-cero
+(`reportes/reemplazos_202610.csv`). Las 1.923 filas de agosto que siguen `PREDICHA` son cesantes reales
+más pagos tardíos aún no recibidos; 10 quedaron `PARCIAL` esperando a un segundo pagador.
 
 ## 11. Supuestos y próximos pasos
 
-* Los parámetros macro y las proporciones (rotación, DNP, rezagos) son supuestos razonables para Chile,
-  no series oficiales; en producción se reemplazan por los datos reales de la AFP y los ajustes se validan
-  con el backtest.
+* Los parámetros macro y las proporciones (rotación, DNP, pagos tardíos) son supuestos razonables para
+  Chile, no series oficiales; en producción se reemplazan por los datos reales de la AFP y los ajustes se
+  validan con el backtest.
+* Supuestos de disponibilidad de información que conviene confirmar con la AFP: las licencias se conocen
+  en m+1 (feed COMPIN/ISAPRE), los avisos AFC en m+1, el IMM y el tope del mes target están legislados al
+  correr el modelo (`imm_target`, `tope_target`; si un reajuste del IMM se publica con retraso, esa
+  feature debería tomar el valor vigente al corte), y `tipo_afiliado` es un atributo del maestro (no una
+  inferencia).
+* La etiqueta de entrenamiento está censurada a `desfase + maduracion` meses (4 con la configuración por
+  defecto, cubre pagos tardíos hasta m+4 y subsidios); los pagos posteriores se etiquetan 0 en
+  entrenamiento pero cuentan en la evaluación. Subir `meses_maduracion` reduce ese sesgo a costa de datos
+  más antiguos.
+* Convenciones documentadas: la RIM del afiliado se topa por pagador y en la suma (la devolución de
+  excesos por multiempleo no se modela); el reporte de reemplazos mide contra el primer dato real que llega
+  (una rectificación posterior lo corrige en el ciclo siguiente).
 * Mejoras naturales: modelo específico para independientes (anual, vía Operación Renta), cuantiles
   (P10/P90) para intervalos, calibración del umbral por segmento según el costo de cada error,
   reentrenamiento automático por drift del reporte de reemplazos, y explicabilidad (SHAP) para auditoría.
