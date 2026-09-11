@@ -70,6 +70,21 @@ def test_rim_conocida_respeta_recepcion(spark, tablas):
     assert tardios.count() > 0  # el generador produce rezagos
 
 
+def test_n_pagadores_sin_empleador(spark, tablas):
+    """SII y voluntarios no tienen empleador: igual cuentan como pagador."""
+    final = rim_conocida(tablas["cotizaciones"], tablas["macro"], None)
+    assert final.filter("rim > 0 and n_pagadores = 0").count() == 0
+
+
+def test_tiene_dnp_respeta_recepcion(spark, tablas):
+    cot, macro = tablas["cotizaciones"], tablas["macro"]
+    hasta = 202409
+    con = rim_conocida(cot, macro, hasta).filter("tiene_dnp = 1").select("afiliado_id", "periodo")
+    decl_dnp = (cot.filter((F.col("estado_pago") == "DNP") & (F.col("tipo_movimiento") == "DECLARACION")
+                           & (F.col("periodo_recepcion") <= hasta)).select("afiliado_id", "periodo").distinct())
+    assert con.join(decl_dnp, ["afiliado_id", "periodo"], "left_anti").count() == 0
+
+
 def test_rim_conocida_tope(spark, tablas):
     final = rim_conocida(tablas["cotizaciones"], tablas["macro"], None)
     excede = final.join(tablas["macro"].select("periodo", "tope_clp"), "periodo") \
@@ -150,11 +165,13 @@ def test_modelo_proyeccion_y_reconciliacion(spark, cfg, tablas):
     real_conocida = rim_conocida(tablas["cotizaciones"], tablas["macro"], add_months(s2, -1)) \
         .select("afiliado_id", "periodo", F.col("rim").alias("r"))
     chk = rec.join(real_conocida, ["afiliado_id", "periodo"], "left")
-    assert chk.filter("r is not null and origen <> 'REAL'").count() == 0
-    assert chk.filter("r is not null and rim_valor <> r").count() == 0
+    # todo lo que llego completo es REAL con el valor real; lo parcial sigue PREDICHA/PARCIAL con al menos lo recibido
+    assert chk.filter("r is not null and origen <> 'REAL' and detalle_origen <> 'PARCIAL'").count() == 0
+    assert chk.filter("r is not null and origen = 'REAL' and rim_valor <> r").count() == 0
+    assert chk.filter("r is not null and detalle_origen = 'PARCIAL' and rim_valor < r").count() == 0
     assert chk.filter("r is null and origen = 'REAL' and detalle_origen <> 'PAGO_ANTICIPADO'").count() == 0
-    assert proy.filter("origen = 'PREDICHA' and detalle_origen = 'PARCIAL' and rim_valor < 0").count() == 0
-    assert rec.filter("origen = 'REAL' and detalle_origen in ('PAGO','PAGO_TARDIO') and rim_predicha_previa is null").count() == 0
+    assert rec.filter("origen = 'REAL' and detalle_origen in ('PAGO','PAGO_TARDIO','DECLARADA_DNP') and rim_predicha_previa is null").count() == 0
+    assert rec.filter("origen = 'REAL' and detalle_origen in ('PAGO','PAGO_TARDIO','DECLARADA_DNP')").count() > 0
     # idempotencia
     rec2 = reconciliar(rec, tablas["cotizaciones"], tablas["macro"], s2, cfg.meses_desfase)
     assert rec2.exceptAll(rec).count() == 0 and rec.exceptAll(rec2).count() == 0

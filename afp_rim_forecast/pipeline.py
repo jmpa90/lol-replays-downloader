@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import time
 
 import pandas as pd
@@ -41,6 +42,8 @@ def _log(msg: str, t0: float) -> None:
 
 # ------------------------------------------------------------------ datos
 def generar_fuentes(spark: SparkSession, cfg: Config, t0: float) -> dict[str, DataFrame]:
+    # las features persistidas dependen de las fuentes: al regenerar se invalidan
+    shutil.rmtree(f"{cfg.ruta_salida}/features", ignore_errors=True)
     tablas = generar_todo(spark, cfg)
     # la macro debe cubrir los meses target posteriores al snapshot
     tablas["macro"] = macro_spark(spark, cfg.periodo_inicio, add_months(cfg.periodo_snapshot, 6))

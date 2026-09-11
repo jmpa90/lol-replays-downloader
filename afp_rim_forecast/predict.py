@@ -11,6 +11,7 @@ from .model import HurdleModel
 COLUMNAS_PROYECCION = [
     "afiliado_id", "periodo", "horizonte", "rim_valor", "origen", "detalle_origen",
     "prob_cotiza", "rim_condicional", "rim_esperada", "rim_predicha_previa",
+    "n_pagadores_esperados", "tipo_afiliado",
     "periodo_snapshot", "periodo_reemplazo", "version_modelo", "fecha_calculo",
 ]
 
@@ -42,7 +43,10 @@ def proyectar(cfg: Config, tablas: dict[str, DataFrame], modelo: HurdleModel, pe
         "prob_cotiza", "rim_condicional",
         F.when(parcial, F.greatest(F.col("rim_esperada"), F.col("rim_ya_conocida")))
         .otherwise(F.col("rim_esperada")).alias("rim_esperada"),
-        F.lit(None).cast("double").alias("rim_predicha_previa"),
+        # en filas PARCIAL se conserva la prediccion pura del modelo para medir su error despues
+        F.when(parcial, F.col("rim_proyectada")).otherwise(F.lit(None).cast("double")).alias("rim_predicha_previa"),
+        F.greatest(F.col("n_pagadores_l1"), F.lit(1.0)).cast("int").alias("n_pagadores_esperados"),
+        "tipo_afiliado",
         F.lit(periodo_snapshot).alias("periodo_snapshot"), F.lit(None).cast("int").alias("periodo_reemplazo"),
         F.lit(modelo.version).alias("version_modelo"), F.lit(fecha_calculo).alias("fecha_calculo")))
     reales = (features.filter(F.col("_completo") == 1).select(
@@ -51,6 +55,7 @@ def proyectar(cfg: Config, tablas: dict[str, DataFrame], modelo: HurdleModel, pe
         F.lit("PAGO_ANTICIPADO").alias("detalle_origen"), F.lit(1.0).alias("prob_cotiza"),
         F.col("rim_ya_conocida").alias("rim_condicional"), F.col("rim_ya_conocida").alias("rim_esperada"),
         F.lit(None).cast("double").alias("rim_predicha_previa"),
+        F.col("n_pagadores_ya_conocidos").cast("int").alias("n_pagadores_esperados"), "tipo_afiliado",
         F.lit(periodo_snapshot).alias("periodo_snapshot"), F.lit(None).cast("int").alias("periodo_reemplazo"),
         F.lit(modelo.version).alias("version_modelo"), F.lit(fecha_calculo).alias("fecha_calculo")))
     return predichas.unionByName(reales).select(*COLUMNAS_PROYECCION)

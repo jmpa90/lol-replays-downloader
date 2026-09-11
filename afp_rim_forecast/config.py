@@ -23,8 +23,8 @@ class Config:
 
     # --- Entrenamiento -----------------------------------------------------
     n_snapshots_entrenamiento: int = 12        # origenes moviles usados para entrenar
-    gap_entrenamiento: int = 4                 # snapshot_train <= snapshot_test - gap (= desfase + maduracion)
-    meses_maduracion: int = 2                  # meses extra de espera para pagos tardios y subsidios
+    gap_entrenamiento: int = 5                 # snapshot_train <= snapshot_test - gap (= desfase + maduracion)
+    meses_maduracion: int = 3                  # meses extra de espera para pagos tardios y subsidios (lag <= 4)
     n_snapshots_test: int = 2                  # origenes reservados para backtest
     gbt_max_iter: int = 40
     gbt_max_depth: int = 5

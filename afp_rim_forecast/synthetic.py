@@ -116,7 +116,8 @@ def generar_empleadores_pandas(cfg: Config) -> pd.DataFrame:
             "rubro": r.codigo,
             "tamano_empleador": t,
             "region_empleador": int(region[i]),
-            "politica_gratificacion": "MENSUAL" if publico else politica_grat[i],
+            # la gratificacion legal (Codigo del Trabajo) no aplica a funcionarios publicos
+            "politica_gratificacion": "NINGUNA" if publico else politica_grat[i],
             "freq_reajuste": "ANUAL_DIC" if publico else freq_reajuste[i],
             # aguinaldos imponibles solo en el sector privado (los del sector publico son no imponibles por ley)
             "aguinaldo_sep": 0.0 if publico else float(rng.gamma(2.0, r.aguinaldo_medio / 2) * (rng.random() < 0.7)),
@@ -543,14 +544,17 @@ def generar_licencias(verdad: DataFrame) -> DataFrame:
                     col_add_months(F.col("periodo"), 1).cast("int").alias("periodo_recepcion")))
 
 
-def generar_afc_eventos(verdad: DataFrame, empleadores: DataFrame) -> DataFrame:
+def generar_afc_eventos(verdad: DataFrame, empleadores: DataFrame, afiliados: DataFrame) -> DataFrame:
     """Eventos del Seguro de Cesantia (AFC): inicio y termino de relacion laboral, conocidos en m+1.
 
-    Los funcionarios publicos (estatuto administrativo) no estan afectos a AFC: no generan eventos.
+    No generan eventos los funcionarios publicos (estatuto administrativo) ni los pensionados
+    que siguen trabajando (excluidos del seguro por la Ley 19.728).
     """
     privados = F.broadcast(empleadores.filter(F.col("rubro") != "O_ADMIN_PUBLICA").select("empleador_id"))
+    afectos = afiliados.filter(F.col("tipo_afiliado") != "PENSIONADO_ACTIVO").select("afiliado_id")
     return (verdad.filter(F.col("evento_afc").isNotNull())
             .join(privados, "empleador_id", "inner")
+            .join(afectos, "afiliado_id", "inner")
             .select("afiliado_id", "periodo", "empleador_id", F.col("evento_afc").alias("tipo_evento"),
                     F.when(F.col("evento_afc") == "INICIO", F.col("tipo_contrato")).alias("tipo_contrato"),
                     col_add_months(F.col("periodo"), 1).cast("int").alias("periodo_recepcion")))
@@ -570,6 +574,6 @@ def generar_todo(spark: SparkSession, cfg: Config) -> dict[str, DataFrame]:
         "verdad_mensual": verdad,
         "cotizaciones": cotizaciones,
         "licencias": generar_licencias(verdad),
-        "afc_eventos": generar_afc_eventos(verdad, empleadores),
+        "afc_eventos": generar_afc_eventos(verdad, empleadores, afiliados),
         "macro": macro_spark(spark, cfg.periodo_inicio, cfg.periodo_snapshot),
     }

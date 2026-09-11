@@ -31,7 +31,7 @@ FEATURES_NUMERICAS = (
        "al_tope_l1", "en_imm_l1", "dist_imm_l1", "pos_rel_empleador", "meses_hasta_pension",
        "rim_ref", "ref_tipo", "rim_ref_sobre_imm", "rim_ref_sobre_tope", "rim_mismo_mes_ly", "ratio_ly_ref",
        "ratio_estacional_ly",
-       "meses_con_empleador", "n_empleadores_12", "n_pagadores_l1", "tiene_subsidio_l1", "tiene_dnp_l1",
+       "meses_con_empleador", "n_empleadores_12", "n_pagadores_l1", "tiene_dnp_l1",
        "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
        "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
        "meses_desde_afc_termino", "meses_desde_afc_inicio",

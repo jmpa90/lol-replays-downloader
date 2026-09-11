@@ -24,8 +24,6 @@ def rim_conocida(cotizaciones: DataFrame, macro: DataFrame, hasta_recepcion: int
     mov = cotizaciones.filter(F.col("tipo_movimiento").isin("DECLARACION", "RECTIFICACION"))
     if hasta_recepcion is not None:
         mov = mov.filter(F.col("periodo_recepcion") <= hasta_recepcion)
-    dnp = (cotizaciones.filter(F.col("estado_pago") == "DNP")
-           .select("afiliado_id", "periodo", "empleador_id").distinct().withColumn("tiene_dnp", F.lit(1)))
     # PAGO_DNP conocidos hasta el snapshot regularizan la DNP
     pagos = cotizaciones.filter(F.col("tipo_movimiento") == "PAGO_DNP")
     if hasta_recepcion is not None:
@@ -34,10 +32,10 @@ def rim_conocida(cotizaciones: DataFrame, macro: DataFrame, hasta_recepcion: int
 
     clave = ["afiliado_id", "periodo", "entidad_pagadora", "empleador_id"]
     w = W.partitionBy(*clave).orderBy(F.col("periodo_recepcion").desc(), F.col("movimiento_id").desc())
+    # el flag DNP sale de la fila vigente (ya filtrada as-of), nunca de movimientos aun no recibidos
     vigente = (mov.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1").drop("_rn")
-               .join(dnp, ["afiliado_id", "periodo", "empleador_id"], "left")
                .join(pagos, ["afiliado_id", "periodo", "empleador_id"], "left")
-               .withColumn("tiene_dnp", F.when((F.col("tiene_dnp") == 1) & F.col("regularizada").isNull(), 1)
+               .withColumn("tiene_dnp", F.when((F.col("estado_pago") == "DNP") & F.col("regularizada").isNull(), 1)
                            .otherwise(0)))
 
     w_emp = W.partitionBy("afiliado_id", "periodo").orderBy(F.col("rim").desc(), F.col("empleador_id"))
@@ -45,7 +43,9 @@ def rim_conocida(cotizaciones: DataFrame, macro: DataFrame, hasta_recepcion: int
            .withColumn("_rk", F.row_number().over(w_emp))
            .groupBy("afiliado_id", "periodo")
            .agg(F.sum("rim").alias("rim_bruta"),
-                F.countDistinct("entidad_pagadora", "empleador_id").alias("n_pagadores"),
+                # count(distinct a, b) descarta filas con nulos (SII/AFILIADO no tienen empleador)
+                F.countDistinct(F.concat_ws("#", F.col("entidad_pagadora"),
+                                            F.coalesce(F.col("empleador_id").cast("string"), F.lit("NA")))).alias("n_pagadores"),
                 F.max(F.when(F.col("_rk") == 1, F.col("empleador_id"))).alias("empleador_principal"),
                 F.max(F.when(F.col("_rk") == 1, F.col("entidad_pagadora"))).alias("pagador_principal"),
                 F.max((F.col("entidad_pagadora") == "SUBSIDIO").cast("int")).alias("tiene_subsidio"),
