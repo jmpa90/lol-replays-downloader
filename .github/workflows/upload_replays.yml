@@ -26,7 +26,6 @@ concurrency:
 jobs:
   upload_replays:
     runs-on: ubuntu-latest
-    
 
     env:
       RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
@@ -45,7 +44,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-api-python-client google-auth google-auth-oauthlib
+
+      - name: Run unit tests
+        run: |
+          python tests/test_extract_match_id.py
+          python tests/test_expired_replays.py
 
       - name: Ensure replays folder exists
         run: mkdir -p replays

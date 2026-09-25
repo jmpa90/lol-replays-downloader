@@ -21,36 +21,6 @@ if not token_json:
 creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
 service = build("drive", "v3", credentials=creds)
 
-import os
-import json
-# CAMBIO 1: Importar service_account
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-
-# # =====================
-# # CONFIG
-# # =====================
-# REPLAY_FOLDER = "replays"
-# DRIVE_FOLDER_ID = "1LnxIj6pEmXkib9TogmbtjkERhbLc9b5u"
-# SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-# # =====================
-# # CARGAR TOKEN DESDE SECRETS (SERVICE ACCOUNT)
-# # =====================
-# # CAMBIO 2: Leer el JSON de la Service Account desde la variable de entorno
-# sa_json = os.environ.get("GCP_SERVICE_ACCOUNT") # Antes era GOOGLE_DRIVE_TOKEN
-# if not sa_json:
-#     raise ValueError("No se encontró la variable de entorno GCP_SERVICE_ACCOUNT")
-
-# # CAMBIO 3: Cargar credenciales usando from_service_account_info
-# try:
-#     sa_info = json.loads(sa_json)
-#     creds = service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
-#     service = build("drive", "v3", credentials=creds)
-# except Exception as e:
-#     raise ValueError(f"Error cargando credenciales de Service Account: {e}")
-
 # =====================
 # SUBIDA DE REPLAYS
 # =====================
@@ -66,29 +36,31 @@ for root, dirs, files in os.walk(REPLAY_FOLDER):
 
             try:
                 # Primero buscar si el archivo ya existe en Drive
-                query = f"name='{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed=false"
+                safe_name = file_name.replace("\\", "\\\\").replace("'", "\\'")
+                query = f"name='{safe_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed=false"
                 results = service.files().list(q=query, fields="files(id, name)").execute()
                 files_in_drive = results.get("files", [])
 
+                # resumable=True: los .rofl pesan varios MB y una subida
+                # simple falla entera ante cualquier corte de red.
+                media = MediaFileUpload(local_path, resumable=True)
                 if files_in_drive:
                     # Si existe, actualizarlo
                     file_id = files_in_drive[0]["id"]
-                    media = MediaFileUpload(local_path, resumable=False)
                     uploaded_file = service.files().update(
                         fileId=file_id,
                         media_body=media,
                         fields="id,name,webViewLink"
-                    ).execute()
+                    ).execute(num_retries=3)
                     print(f"Actualizado: {uploaded_file['name']} (ID: {uploaded_file['id']})")
                 else:
                     # Si no existe, crear nuevo
                     file_metadata = {"name": file_name, "parents": [DRIVE_FOLDER_ID]}
-                    media = MediaFileUpload(local_path, resumable=False)
                     uploaded_file = service.files().create(
                         body=file_metadata,
                         media_body=media,
                         fields="id,name,webViewLink"
-                    ).execute()
+                    ).execute(num_retries=3)
                     print(f"Subido: {uploaded_file['name']} (ID: {uploaded_file['id']})")
 
                 uploaded_metadata.append({
