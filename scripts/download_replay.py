@@ -1,6 +1,6 @@
 import requests
 import time
-from collections import deque
+from collections import Counter, deque
 import os
 import re
 import csv
@@ -30,6 +30,17 @@ TIME_WINDOW_2_MIN = 120
 PLAYERS_CSV = "data/players.csv"
 
 request_times = deque()
+
+# Per-run counters for the match-v5 /replays endpoint. Riot's patch 26.20
+# (2026-10-06) says third-party apps "lose access to replay downloads
+# entirely" without naming this endpoint, so we log what it actually returns
+# and fail loudly if it stops serving us (see report_endpoint_health).
+replays_endpoint_statuses = Counter()   # HTTP status -> count of calls
+replays_listed = 0                      # replay URLs returned across players
+replays_saved = 0                       # files actually written this run
+# Statuses that mean "this endpoint no longer works for us" (as opposed to a
+# one-off bad account, which also 403/404s on account-v1 -- see main()).
+ENDPOINT_GONE_STATUSES = {401, 403, 404, 410}
 
 # =====================
 # RATE-LIMIT SAFE GET
@@ -132,8 +143,19 @@ def download_replays(puuid, region):
     replay_folder = f"replays/{region}"
     os.makedirs(replay_folder, exist_ok=True)
 
+    global replays_listed, replays_saved
+
     url = (f"https://{region}.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/replays")
-    replays = safe_get(url, headers=HEADERS).json().get("matchFileURLs", [])
+    try:
+        resp = safe_get(url, headers=HEADERS)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "error"
+        replays_endpoint_statuses[status] += 1
+        print(f"⚠️ /replays ({region}) respondió HTTP {status}")
+        raise
+    replays_endpoint_statuses[resp.status_code] += 1
+    replays = resp.json().get("matchFileURLs", [])
+    replays_listed += len(replays)
 
     for replay_url in replays:
         match_id = extract_match_id(replay_url)
@@ -147,7 +169,42 @@ def download_replays(puuid, region):
         with open(file_path, "wb") as f:
             f.write(r.content)
 
+        replays_saved += 1
         print(f"✅ Guardado {match_id}.rofl ({region})")
+
+# =====================
+# ENDPOINT HEALTH
+# =====================
+def report_endpoint_health():
+    """Print a one-line summary of the /replays endpoint and return False if
+    it looks permanently closed to us (every call got 401/403/404/410), so
+    main() can fail the step instead of reporting a green "nothing new" run."""
+    total = sum(replays_endpoint_statuses.values())
+    summary = ", ".join(f"HTTP {k}: {v}" for k, v in sorted(
+        replays_endpoint_statuses.items(), key=lambda kv: str(kv[0]))) or "sin llamadas"
+    print(f"📊 /replays -> {summary} | listados: {replays_listed} | guardados: {replays_saved}")
+
+    if total == 0:
+        return True
+
+    gone = sum(v for k, v in replays_endpoint_statuses.items()
+               if k in ENDPOINT_GONE_STATUSES)
+    if gone == total:
+        print(
+            "::error title=Riot /replays endpoint cerrado::"
+            f"Todas las llamadas ({total}) a match-v5 /replays dieron "
+            f"{sorted(replays_endpoint_statuses)}. Posible efecto del parche 26.20 "
+            "(terceros pierden descarga de replays)."
+        )
+        return False
+
+    if replays_listed == 0 and replays_endpoint_statuses.get(200, 0) == total:
+        print(
+            "::warning title=Riot /replays sin replays::"
+            f"{total} llamadas OK pero 0 replays listados."
+        )
+    return True
+
 
 # =====================
 # MAIN
@@ -174,6 +231,9 @@ def main():
                 f"⚠️ Error con {player['riotIdGameName']}#{player['riotIdTagline']} "
                 f"({player['region']}): {exc}"
             )
+
+    if not report_endpoint_health():
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()
