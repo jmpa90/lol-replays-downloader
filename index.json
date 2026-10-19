@@ -137206,5 +137206,29 @@
     "drive_file_id": "1234VH8rLZnpqskA8xpPVCIozy7nhB6ln",
     "webViewLink": "https://drive.google.com/file/d/1234VH8rLZnpqskA8xpPVCIozy7nhB6ln/view?usp=drivesdk",
     "local_path": "replays/europe/EUW1_8018266654.rofl"
+  },
+  {
+    "file_name": "KR_8425392302.rofl",
+    "drive_file_id": "1HijC-e9zuxmP_cFrEsejDP9HgwzAFTfq",
+    "webViewLink": "https://drive.google.com/file/d/1HijC-e9zuxmP_cFrEsejDP9HgwzAFTfq/view?usp=drivesdk",
+    "local_path": "replays/asia/KR_8425392302.rofl"
+  },
+  {
+    "file_name": "KR_8425407171.rofl",
+    "drive_file_id": "1N6uASgOs3aRaGznIz2xI163t94XlPye_",
+    "webViewLink": "https://drive.google.com/file/d/1N6uASgOs3aRaGznIz2xI163t94XlPye_/view?usp=drivesdk",
+    "local_path": "replays/asia/KR_8425407171.rofl"
+  },
+  {
+    "file_name": "EUW1_8018280779.rofl",
+    "drive_file_id": "1zFyXlPVMAu1XTvjuTzHMSRPQwrYr2fit",
+    "webViewLink": "https://drive.google.com/file/d/1zFyXlPVMAu1XTvjuTzHMSRPQwrYr2fit/view?usp=drivesdk",
+    "local_path": "replays/europe/EUW1_8018280779.rofl"
+  },
+  {
+    "file_name": "EUW1_8018267159.rofl",
+    "drive_file_id": "1YjmyrgDxT4ylZocRJjTOZvREFligb7Xi",
+    "webViewLink": "https://drive.google.com/file/d/1YjmyrgDxT4ylZocRJjTOZvREFligb7Xi/view?usp=drivesdk",
+    "local_path": "replays/europe/EUW1_8018267159.rofl"
   }
 ]
